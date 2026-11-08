@@ -25,6 +25,7 @@ struct Settings {
   enum : uint16_t { kLeftTrigger = 0x0400, kRightTrigger = 0x0800 };
   std::array<uint16_t, kButtons> pad{};
 
+  std::string iso;  // the game's disc image, UTF-8 (set by the setup, or when the game asks for it)
   bool fullscreen = false;
   int windowWidth = 960, windowHeight = 720;  // the window's inside, out of full screen
   bool wide = false;  // the picture shown 16:9 instead of 4:3

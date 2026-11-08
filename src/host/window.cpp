@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <commdlg.h>
 #include <immintrin.h>
 #include <mmsystem.h>
 #include <intrin.h>
@@ -143,6 +144,17 @@ void useParentConsole() {
   freopen_s(&f, "CONOUT$", "w", stdout);
   freopen_s(&f, "CONOUT$", "w", stderr);
   gConsole = true;
+}
+
+std::filesystem::path askForIso() {
+  wchar_t file[MAX_PATH * 4] = {};
+  OPENFILENAMEW ofn{sizeof(ofn)};
+  ofn.lpstrFilter = L"Imagem de disco / Disc image (*.iso)\0*.iso\0";
+  ofn.lpstrFile = file;
+  ofn.nMaxFile = DWORD(std::size(file));
+  ofn.lpstrTitle = L"Castlevania: Curse of Darkness (SLES-53755) - ISO";
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+  return GetOpenFileNameW(&ofn) ? std::filesystem::path(file) : std::filesystem::path();
 }
 
 void reportError(const std::string& message) {

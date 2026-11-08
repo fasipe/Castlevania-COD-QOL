@@ -139,6 +139,10 @@ void Settings::load(const std::filesystem::path& from) {
     const size_t eq = line.find('=');
     if (eq == std::string::npos) continue;
     const std::string key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
+    if (section == "disco" && key == "iso") {
+      iso = value;
+      continue;
+    }
     if (section == "janela") {
       if (key == "tela_cheia") fullscreen = value == "1";
       if (key == "tamanho_janela") {
@@ -173,6 +177,8 @@ void Settings::save() const {
          "# Teclado: letras, numeros, F1-F24, Num0-Num9, Enter, Espaco, Backspace, Tab, Esc, Shift, Ctrl,\n"
          "# Alt, Cima, Baixo, Esquerda, Direita... Controle (Xbox): A, B, X, Y, LB, RB, LT, RT, Back, Start,\n"
          "# LS, RS, Cima, Baixo, Esquerda, Direita. Vazio = nenhuma.\n\n";
+  out << "[disco]\n# A imagem do disco do jogo (SLES-53755); vazio = o primeiro .iso desta pasta ou de uma acima\niso=" << iso
+      << "\n\n";
   out << "[janela]\ntela_cheia=" << (fullscreen ? 1 : 0)
       << "\n# Tamanho da janela fora da tela cheia, em pixels (em tela cheia vale o do monitor)\ntamanho_janela=" << windowWidth << 'x'
       << windowHeight << "\nproporcao=" << (wide ? "16:9" : "4:3")

@@ -76,7 +76,7 @@ else()
 endif()
 
 target_include_directories(codport PRIVATE src)
-target_link_libraries(codport PRIVATE user32 gdi32 comctl32 dbghelp winmm xinput d3d11 dxgi d3dcompiler)
+target_link_libraries(codport PRIVATE user32 gdi32 comctl32 comdlg32 dbghelp winmm xinput d3d11 dxgi d3dcompiler)
 
 # Compiled VU micro programs (recomp/vu, written by `codport --vu-recompile`, see recompile.bat).
 if(EXISTS ${CMAKE_SOURCE_DIR}/recomp/vu/table.cpp)

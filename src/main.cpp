@@ -214,11 +214,34 @@ int main(int argc, char** argv) {
       isoPath = a;
     }
   }
+  // The disc image: given, else the one the setup or an earlier question saved, else the first .iso
+  // here or above, else the player picks it (and it is saved for next time).
+  const fs::path exeDir = fs::absolute(argv[0]).parent_path();
+  const fs::path settingsFile = (exeDir.filename() == "build" ? exeDir.parent_path() : exeDir) / "codport.ini";
+  auto fromUtf8 = [](const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); };
+  if (isoPath.empty() && !headless) {
+    Settings saved = Settings::defaults();
+    saved.load(settingsFile);
+    if (!saved.iso.empty() && fs::exists(fromUtf8(saved.iso))) isoPath = fromUtf8(saved.iso);
+  }
   if (isoPath.empty()) isoPath = findIso();
+  if (isoPath.empty() && !headless) {
+    isoPath = askForIso();
+    if (!isoPath.empty()) {
+      Settings saved = Settings::defaults();
+      saved.load(settingsFile);
+      const std::u8string chosen = isoPath.u8string();
+      saved.iso.assign(chosen.begin(), chosen.end());
+      saved.file = settingsFile;
+      saved.save();
+    }
+  }
   if (isoPath.empty()) {
     usage();
-    reportError("Nenhuma imagem do jogo encontrada. Coloque a ISO do seu disco de Castlevania: Curse of Darkness "
-                "(SLES-53755) na pasta do codport ou em uma pasta acima dela.");
+    reportError("No disc image of the game was found. Put the ISO of your Castlevania: Curse of Darkness disc (SLES-53755) "
+                "in the codport folder or one above it, or run Setup.bat.\n\nNenhuma imagem do jogo encontrada. Coloque a "
+                "ISO do seu disco de Castlevania: Curse of Darkness (SLES-53755) na pasta do codport ou em uma acima dela, "
+                "ou rode o Setup.bat.");
     return 1;
   }
 
@@ -232,7 +255,13 @@ int main(int argc, char** argv) {
   const std::string bootPath = cnf ? bootPathFrom(iso.readFile(*cnf)) : "";
   const auto exe = iso.find(bootPath);
   if (!exe) {
-    reportError("A imagem " + isoPath.filename().string() + " nao parece ser um disco de PS2 (sem o executavel do jogo).");
+    reportError(isoPath.filename().string() + " is not a PS2 disc image.\n\n" + isoPath.filename().string() +
+                " nao e uma imagem de disco de PS2.");
+    return 1;
+  }
+  if (bootPath.find("SLES_537.55") == std::string::npos) {
+    reportError("This disc image is not Castlevania: Curse of Darkness for Europe (SLES-53755), the only version this port "
+                "runs.\n\nEsta imagem nao e Castlevania: Curse of Darkness europeu (SLES-53755), a unica versao que este port roda.");
     return 1;
   }
   std::printf("disc:  %s (%zu files)\nboot:  %s (%u bytes)\n", isoPath.filename().string().c_str(),
@@ -293,7 +322,6 @@ int main(int argc, char** argv) {
   std::vector<int16_t> sound, audio;  // this frame's samples; all of them (--wav)
   if (!wavFile.empty() || !headless) sif.spu->output = &sound;
   // Memory card saves live next to the build folder, so rebuilding never touches them.
-  const fs::path exeDir = fs::absolute(argv[0]).parent_path();
   sif.saveDir = (exeDir.filename() == "build" ? exeDir.parent_path() : exeDir) / "memcard";
   sif.clockBase = int64_t(std::time(nullptr));
 
@@ -368,7 +396,6 @@ int main(int argc, char** argv) {
   if (!headless) {
     // Settings (keys, controller, window) next to the memory card folder; written once with the
     // defaults so the player can find it.
-    const fs::path settingsFile = (exeDir.filename() == "build" ? exeDir.parent_path() : exeDir) / "codport.ini";
     const bool existed = fs::exists(settingsFile);
     settings().load(settingsFile);
     if (replayFile.empty()) setAttackTurn(settings().attackTurn), setSprint(settings().sprint);

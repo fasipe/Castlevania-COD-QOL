@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -38,6 +39,8 @@ void useParentConsole();
 // A message for the player that stops the program: printed, and shown in a box when there is no
 // console to read it in.
 void reportError(const std::string& message);
+// Asks the player for the game's disc image (an Open dialog); empty if they cancel.
+std::filesystem::path askForIso();
 
 bool wideScreen();  // F10: the picture is shown 16:9 instead of 4:3
 // The F1 window's options page changes these on the game window (an HWND) as its keys do.

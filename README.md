@@ -61,19 +61,18 @@ Install Visual Studio or the Visual Studio Build Tools with **Desktop developmen
 git clone <this repository's URL> codport
 ```
 
-### 3. Add Your Game Disc
+### 3. Run the Setup
 
-Put your ISO in the repository folder (or in any folder above it). The port uses the first `.iso` it finds, looking from the folder it runs in and up.
+Run `Setup.bat`. It checks the build tools (and can install the free Visual Studio Build Tools for you), asks for the image of your disc and checks that it is the right game, builds the game from it, and puts a **Castlevania - Curse of Darkness** shortcut on the desktop. Building takes several minutes, once.
 
-### 4. Build the Port
+From then on the shortcut, or `build\codport.exe`, just opens the game. It opens no console window.
 
-Run `build.bat`. This builds the port alone; it already runs the game, but by interpreting its MIPS code, slowly.
+### Building by Hand
 
-### 5. Recompile the Game
-
-Run `recompile.bat`. It reads the game's executable from your ISO, translates the functions listed in `tools/recomp/functions.txt` to C++ (in `recomp/gen`), compiles the VU1 micro programs listed in `tools/recomp/vu-blocks.idx` (in `recomp/vu`), and builds the port again with them. It takes a while and writes about 100 MB of code, which must not be shared.
-
-Then run `build\codport.exe`. It opens no console window; started from a terminal, its messages show there.
+1. Put your ISO in the repository folder (or in any folder above it), or let the game ask for it the first time it starts; the path is kept in `codport.ini`.
+2. Run `build.bat`. This builds the port alone; it already runs the game, but by interpreting its MIPS code, slowly.
+3. Run `recompile.bat`. It reads the game's executable from your ISO, translates the functions listed in `tools/recomp/functions.txt` to C++ (in `recomp/gen`), compiles the VU1 micro programs listed in `tools/recomp/vu-blocks.idx` (in `recomp/vu`), and builds the port again with them. It writes about 100 MB of code, which must not be shared.
+4. Run `build\codport.exe`. Started from a terminal, its messages show there.
 
 ## Controls
 
@@ -213,19 +212,18 @@ Instale o Visual Studio ou o Visual Studio Build Tools com **Desenvolvimento par
 git clone <URL deste repositório> codport
 ```
 
-### 3. Adicione o Seu Disco do Jogo
+### 3. Rode o Setup
 
-Coloque a sua ISO na pasta do repositório (ou em qualquer pasta acima dela). O port usa o primeiro `.iso` que encontrar, procurando da pasta em que roda para cima.
+Rode `Setup.bat`. Ele confere as ferramentas de compilação (e pode instalar o Visual Studio Build Tools gratuito para você), pede a imagem do seu disco e confere se é o jogo certo, gera o jogo a partir dela e cria um atalho **Castlevania - Curse of Darkness** na área de trabalho. A geração leva vários minutos, uma vez só.
 
-### 4. Compile o Port
+Daí em diante o atalho, ou `build\codport.exe`, só abre o jogo. Ele não abre janela de console.
 
-Rode `build.bat`. Isso compila o port sozinho; ele já roda o jogo, mas interpretando o código MIPS, devagar.
+### Compilação à Mão
 
-### 5. Recompile o Jogo
-
-Rode `recompile.bat`. Ele lê o executável do jogo na sua ISO, traduz para C++ as funções listadas em `tools/recomp/functions.txt` (em `recomp/gen`), compila os microprogramas da VU1 listados em `tools/recomp/vu-blocks.idx` (em `recomp/vu`) e compila o port de novo com eles. Demora um pouco e gera cerca de 100 MB de código, que não deve ser compartilhado.
-
-Depois rode `build\codport.exe`. Ele não abre janela de console; rodado de um terminal, as mensagens aparecem nele.
+1. Coloque a sua ISO na pasta do repositório (ou em qualquer pasta acima dela), ou deixe o jogo pedir por ela na primeira vez que abrir; o caminho fica guardado no `codport.ini`.
+2. Rode `build.bat`. Isso compila o port sozinho; ele já roda o jogo, mas interpretando o código MIPS, devagar.
+3. Rode `recompile.bat`. Ele lê o executável do jogo na sua ISO, traduz para C++ as funções listadas em `tools/recomp/functions.txt` (em `recomp/gen`), compila os microprogramas da VU1 listados em `tools/recomp/vu-blocks.idx` (em `recomp/vu`) e compila o port de novo com eles. Ele gera cerca de 100 MB de código, que não deve ser compartilhado.
+4. Rode `build\codport.exe`. Rodado de um terminal, as mensagens aparecem nele.
 
 ## Controles
 
