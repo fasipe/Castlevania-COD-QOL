@@ -104,7 +104,7 @@ $browse = Add-Button (T 'Browse...' 'Procurar...') 504 145 120
 $isoStatus = Add-Label '' 32 176 592 20
 
 # 3. Build
-Add-Label (T '3. Build the game from it (about a minute; once)' '3. Gerar o jogo a partir dela (cerca de um minuto; só uma vez)') 16 210 608 20 $true | Out-Null
+Add-Label (T '3. Build the game from it (about half a minute; once)' '3. Gerar o jogo a partir dela (cerca de meio minuto; só uma vez)') 16 210 608 20 $true | Out-Null
 $prepare = Add-Button (T 'Build the game' 'Gerar o jogo') 32 236 160
 $play = Add-Button (T 'Play' 'Jogar') 504 236 120
 $progress = Add-Label '' 204 242 296 20
@@ -224,7 +224,7 @@ $timer.Add_Tick({
       $link.Save()
       $progress.Text = (T 'Ready to play. Finishing the rest in the background. ' 'Pronto para jogar. O resto termina em segundo plano. ') + $took
       $output.AppendText("`r`n$took")
-      $output.AppendText((T "`r`n--- The game can be played now (shortcut on the desktop). The functions it seldom runs are still being optimized, at low priority; until then they run more slowly. This window can be closed.`r`n`r`n" "`r`n--- Já dá para jogar (atalho na área de trabalho). As funções que o jogo raramente usa ainda estão sendo otimizadas, com prioridade baixa; até lá elas rodam mais devagar. Esta janela pode ser fechada.`r`n`r`n"))
+      $output.AppendText((T "`r`n--- The game can be played now (shortcut on the desktop). The rest of its code is still being built in the background, at low priority, and the game starts using it by itself, even while it is open. This window can be closed.`r`n`r`n" "`r`n--- Já dá para jogar (atalho na área de trabalho). O resto do código dele continua sendo gerado em segundo plano, com prioridade baixa, e o jogo passa a usá-lo sozinho, mesmo já aberto. Esta janela pode ser fechada.`r`n`r`n"))
       $script:rest = Start-Phase 'rest' $restLog
     } else {
       $timer.Stop()

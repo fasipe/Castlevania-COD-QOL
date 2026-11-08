@@ -540,16 +540,23 @@ bool generateRecompiledCode(Memory& mem, const fs::path& functionsFile, const fs
     std::erase_if(functions, [&](const Function& f) { return !keep.count(f.entry); });
   }
 
-  // The functions the game runs (hot-functions.txt next to the list: those that ran in long
-  // profiled sessions) go to recomp/gen/hot, built first into codport_game.dll so the game can
-  // start; the rest to recomp/gen/cold, built afterwards into codport_game_cold.dll, the interpreter
-  // running them until it is there. Both fully optimized. Without the list, all of them are hot.
-  std::unordered_set<uint32_t> hotList;
-  if (std::ifstream in(functionsFile.parent_path() / "hot-functions.txt"); in) {
-    std::string line;
-    while (std::getline(in, line))
-      if (!line.empty() && line[0] != '#') hotList.insert(uint32_t(std::stoul(line, nullptr, 16)));
-  }
+  // Three parts, all fully optimized, built one after the other so the game can start early:
+  // recomp/gen/boot, what the game runs from its start into the first moments of play
+  // (boot-functions.txt next to the list), built first into codport_game.dll; recomp/gen/hot, the
+  // rest of what it runs (hot-functions.txt: what ran in long profiled sessions), into
+  // codport_game_hot.dll; recomp/gen/cold, everything else, into codport_game_cold.dll. Until a
+  // part is there the interpreter runs its functions, and the game loads it as soon as it is built
+  // (src/recomp/gamecode.cpp). Without the lists, all of them are in the first part.
+  auto readList = [&](const char* name) {
+    std::unordered_set<uint32_t> list;
+    if (std::ifstream in(functionsFile.parent_path() / name); in) {
+      std::string line;
+      while (std::getline(in, line))
+        if (!line.empty() && line[0] != '#') list.insert(uint32_t(std::stoul(line, nullptr, 16)));
+    }
+    return list;
+  };
+  const std::unordered_set<uint32_t> bootList = readList("boot-functions.txt"), hotList = readList("hot-functions.txt");
 
   struct Part {
     fs::path dir;
@@ -558,7 +565,7 @@ bool generateRecompiledCode(Memory& mem, const fs::path& functionsFile, const fs
     int fileIndex = 0;
     size_t functions = 0;
   };
-  Part parts[2] = {{outDir / "hot"}, {outDir / "cold"}};
+  Part parts[3] = {{outDir / "boot"}, {outDir / "hot"}, {outDir / "cold"}};
   fs::create_directories(outDir);
   for (const auto& e : fs::directory_iterator(outDir))  // the earlier layout, all in one folder
     if (e.path().extension() == ".cpp") fs::remove(e.path());
@@ -585,7 +592,8 @@ bool generateRecompiledCode(Memory& mem, const fs::path& functionsFile, const fs
     ++p.fileIndex;
   };
   for (const Function& f : functions) {
-    Part& p = hotList.empty() || hotList.count(f.entry) ? parts[0] : parts[1];
+    const bool hot = hotList.empty() || hotList.count(f.entry);
+    Part& p = bootList.count(f.entry) || (hot && bootList.empty()) ? parts[0] : hot ? parts[1] : parts[2];
     std::vector<uint32_t> entries;
     Emitter em(mem, f);
     p.body += em.run(entries);
@@ -604,8 +612,9 @@ bool generateRecompiledCode(Memory& mem, const fs::path& functionsFile, const fs
     table += "}\n";
     std::ofstream(p.dir / "table.cpp") << table;
   }
-  std::printf("recompiled %zu functions (%zu entry points): %zu the game runs in %d files, %zu others in %d files, in %s\n",
+  std::printf("recompiled %zu functions (%zu entry points): %zu to start (%d files), %zu more the game runs (%d files), %zu others "
+              "(%d files), in %s\n",
               functions.size(), totalEntries, parts[0].functions, parts[0].fileIndex, parts[1].functions, parts[1].fileIndex,
-              outDir.string().c_str());
+              parts[2].functions, parts[2].fileIndex, outDir.string().c_str());
   return true;
 }

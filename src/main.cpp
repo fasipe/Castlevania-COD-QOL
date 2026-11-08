@@ -42,7 +42,8 @@
 #include "recomp/generator.h"
 #include "recomp/runtime.h"
 
-void registerRecompiled(std::vector<rc::Entry>& out);  // generated (or recomp/none.cpp)
+void registerRecompiled(std::vector<rc::Entry>& out);  // src/recomp/gamecode.cpp
+bool newGameCode(std::vector<rc::Entry>& out);
 
 namespace fs = std::filesystem;
 
@@ -318,6 +319,10 @@ int main(int argc, char** argv) {
   if (!interpOnly) {
     std::vector<rc::Entry> entries;
     registerRecompiled(entries);
+    // The table covers all of the program now, so that parts of the code loaded later (while the
+    // CPU runs) only fill slots in it.
+    for (const auto& seg : elf.segments)
+      if (seg.vaddr >= Cpu::kRecompBase) cpu.recomp.resize(std::max<size_t>(cpu.recomp.size(), (seg.vaddr + seg.memSize - Cpu::kRecompBase) >> 2));
     for (const rc::Entry& e : entries) {
       const uint32_t index = (e.pc - Cpu::kRecompBase) >> 2;
       if (cpu.recomp.size() <= index) cpu.recomp.resize(index + 1);
@@ -476,6 +481,19 @@ int main(int argc, char** argv) {
       sound.clear();
     }
     if (stopFrame && n >= stopFrame) cpu.halt(StopReason::Limit, std::format("frame {}", n));
+    // Parts of the game's code the setup finished building since: in use from now on, where the
+    // interpreter ran them (never over a slot already filled, the port's hooks among them).
+    if (!interpOnly && n % 50 == 0) {
+      std::vector<rc::Entry> more;
+      if (newGameCode(more)) {
+        size_t added = 0;
+        for (const rc::Entry& e : more) {
+          const size_t index = (e.pc - Cpu::kRecompBase) >> 2;
+          if (index < cpu.recomp.size() && !cpu.recomp[index]) cpu.recomp[index] = e.fn, ++added;
+        }
+        std::printf("frame %llu: %zu more recompiled entry points\n", (unsigned long long)n, added);
+      }
+    }
     if (callsFrom && n == callsFrom) {  // only count what runs from here on
       cpu.calls.clear();
       cpu.callOrder.clear();

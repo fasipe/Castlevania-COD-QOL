@@ -1,6 +1,8 @@
 @echo off
 rem Builds the game's code from the disc image: "first" translates it and builds codport_game.dll
-rem (what the game runs, enough to play); "rest" builds codport_game_cold.dll (everything else).
+rem (what the game runs from its start, enough to play); "rest" builds codport_game_vu.dll (the VU
+rem programs), codport_game_hot.dll (the rest of what the game runs) and codport_game_cold.dll
+rem (everything else), each followed by a .ready file that tells a running game to load it.
 rem With a release's codport.exe and codport.lib in build\ (and no build of the port there), only
 rem the game's code is built, in build-game\; otherwise the port is built first.
 setlocal
@@ -27,6 +29,11 @@ if not defined ONLY (
   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
   cmake --build build --target codport || exit /b 1
 )
+rem The parts built before are of another build of the code: not for a game started now.
+for %%f in (codport_game_vu codport_game_hot codport_game_cold) do (
+  if exist build\%%f.ready del build\%%f.ready
+  if exist build\%%f.dll del build\%%f.dll
+)
 echo %time% translating the game / traduzindo o jogo
 build\codport.exe --recompile tools\recomp\functions.txt recomp\gen || exit /b 1
 set "VUBLOCKS=tools\recomp\vu-blocks.idx"
@@ -42,6 +49,12 @@ exit /b 0
 
 :rest
 echo %time% compiling / compilando
+cmake --build %OUT% --target codport_game_vu || exit /b 1
+echo.> build\codport_game_vu.ready
+cmake --build %OUT% --target codport_game_hot || exit /b 1
+echo.> build\codport_game_hot.ready
+echo %time% half / metade
 cmake --build %OUT% --target codport_game_cold || exit /b 1
+echo.> build\codport_game_cold.ready
 echo %time% done / pronto
 exit /b 0

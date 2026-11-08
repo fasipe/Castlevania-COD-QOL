@@ -11,7 +11,9 @@
 #include "ee/vu_ops.h"
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
@@ -279,15 +281,23 @@ struct Collected {
   uint32_t pc;
   std::vector<uint32_t> words;
 };
-std::unordered_map<uint64_t, VuBlockEntry>& blockRegistry() {
-  static std::unordered_map<uint64_t, VuBlockEntry> registry = [] {
+// The compiled blocks: those there at start, then more if their DLL is built while the game runs
+// (addVuBlocks). Replaced whole, so a lookup on the VU thread always sees a complete one.
+using Registry = std::unordered_map<uint64_t, VuBlockEntry>;
+std::mutex gRegistryMutex;
+std::shared_ptr<const Registry> gRegistry;
+std::atomic<uint32_t> gRegistryVersion{0};
+
+std::shared_ptr<const Registry> blockRegistry() {
+  std::lock_guard lock(gRegistryMutex);
+  if (!gRegistry) {
     std::vector<VuBlockEntry> entries;
     registerVuBlocks(entries);
-    std::unordered_map<uint64_t, VuBlockEntry> m;
-    for (const VuBlockEntry& e : entries) m.emplace(e.hash, e);
-    return m;
-  }();
-  return registry;
+    auto m = std::make_shared<Registry>();
+    for (const VuBlockEntry& e : entries) m->emplace(e.hash, e);
+    gRegistry = std::move(m);
+  }
+  return gRegistry;
 }
 const char* collectPath() {
   static const char* path = std::getenv("CODPORT_VU_COLLECT");
@@ -301,8 +311,8 @@ VuMicro::BlockFn VuMicro::findBlock(uint32_t pc) {
   const int n = blockLength(pc);
   if (n == 0) return nullptr;
   const uint64_t hash = vuBlockHash(pc, code_ + pc, n);
-  const auto& registry = blockRegistry();
-  if (auto it = registry.find(hash); it != registry.end() && it->second.pc == pc && int(it->second.pairs) == n) return it->second.fn;
+  const auto registry = blockRegistry();
+  if (auto it = registry->find(hash); it != registry->end() && it->second.pc == pc && int(it->second.pairs) == n) return it->second.fn;
   if (collectPath()) {
     std::lock_guard lock(gCollectMutex);
     Collected& c = gCollected[hash];
@@ -355,6 +365,8 @@ struct RoundTowardZero {
 void VuMicro::run(uint32_t startAddr) {
   ScopedTimer timer(runNanos);
   if (codeTouches && *codeTouches != seenTouches_) seenTouches_ = *codeTouches, codeChanged();
+  // More compiled blocks since the last run: blocks looked up before are looked up again.
+  if (const uint32_t v = gRegistryVersion.load(std::memory_order_acquire); v != seenRegistry_) seenRegistry_ = v, codeChanged();
   const RoundTowardZero rounding;
   ++programs;
   uint32_t pc = startAddr & (codeBytes_ - 1);
@@ -590,4 +602,15 @@ void VuMicro::lower(uint32_t op, uint32_t pc) {
   uint32_t q;
   if (vuLowerCommon(r_, op, data_, dataQwords, &q)) return;
   fault = std::format("lower instruction 0x{:08X} at 0x{:04X}", op, pc);
+}
+
+void addVuBlocks(const std::vector<VuBlockEntry>& entries) {
+  const auto old = blockRegistry();
+  auto m = std::make_shared<Registry>(*old);
+  for (const VuBlockEntry& e : entries) m->emplace(e.hash, e);
+  {
+    std::lock_guard lock(gRegistryMutex);
+    gRegistry = std::move(m);
+  }
+  gRegistryVersion.fetch_add(1, std::memory_order_release);
 }

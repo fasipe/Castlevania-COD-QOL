@@ -118,6 +118,7 @@ public:
   int blockLength(uint32_t pc) const;
   BlockFn findBlock(uint32_t pc);
   uint64_t generation_ = 1, seenTouches_ = 0;
+  uint32_t seenRegistry_ = 0;
 
   static constexpr int kFlagLatency = 4;
   struct PendingFlags {
@@ -157,6 +158,8 @@ struct VuBlockEntry {
   VuMicro::BlockFn fn;
 };
 void registerVuBlocks(std::vector<VuBlockEntry>& out);
+// Compiled blocks that became available while the game runs (src/recomp/gamecode.cpp).
+void addVuBlocks(const std::vector<VuBlockEntry>& entries);
 CODPORT_API uint64_t vuBlockHash(uint32_t pc, const uint8_t* code, int pairs);
 // With CODPORT_VU_COLLECT=FILE, blocks run without compiled code are added to FILE at exit.
 void vuCollectSave();

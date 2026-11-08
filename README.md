@@ -64,8 +64,8 @@ Download the latest release from the **Releases** page and extract it. It comes 
 
 Run `Setup.bat`. It checks the build tools (and can install the free Visual Studio Build Tools for you), asks for the image of your disc and checks that it is the right game, then builds the game from it in two parts:
 
-- **The code the game runs** - translated from your disc and compiled into `codport_game.dll` in about a minute (47 seconds on a 16-thread Core i5-14400F). Then the game can be played, and a **Castlevania - Curse of Darkness** shortcut is on the desktop, with the bust of Hector that the PS2 showed for the game's saves (drawn from your disc as well).
-- **Everything else** - the functions the game seldom runs, compiled into `codport_game_cold.dll` in the background, at a low priority, for a couple more minutes, even if the setup window is closed. Until then those functions run on the interpreter, more slowly.
+- **What the game runs from its start** - the code for the boot, the menus and nearly all of the time in play (picked by profiling recorded sessions), translated from your disc and compiled into `codport_game.dll` in about half a minute (15 seconds on the six performance cores of a Core i5-14400F). Then the game can be played, and a **Castlevania - Curse of Darkness** shortcut is on the desktop, with the bust of Hector that the PS2 showed for the game's saves (drawn from your disc as well).
+- **Everything else** - the VU1 micro programs, the rest of what the game runs and the functions it seldom runs, compiled into `codport_game_vu.dll`, `codport_game_hot.dll` and `codport_game_cold.dll` in the background, at a low priority, for a few more minutes, even if the setup window is closed. Until each part is there its code runs on the interpreter, more slowly, and a game already open starts using it as soon as it is built.
 
 Both parts are compiled with full optimization, and the same code results as building it all at once. From then on the shortcut, or `build\codport.exe`, just opens the game. It opens no console window.
 
@@ -73,7 +73,7 @@ Both parts are compiled with full optimization, and the same code results as bui
 
 1. Put your ISO in the repository folder (or in any folder above it), or let the game ask for it the first time it starts; the path is kept in `codport.ini`.
 2. Run `build.bat`. This builds the port alone; it already runs the game, but by interpreting its MIPS code, slowly.
-3. Run `recompile.bat`. It reads the game's executable from your ISO, translates the functions listed in `tools/recomp/functions.txt` to C++ (in `recomp/gen`, the ones listed in `tools/recomp/hot-functions.txt` apart from the others), compiles the VU1 micro programs listed in `tools/recomp/vu-blocks.idx` (in `recomp/vu`), and builds `codport_game.dll` and `codport_game_cold.dll` from them. It writes about 100 MB of code, which must not be shared.
+3. Run `recompile.bat`. It reads the game's executable from your ISO, translates the functions listed in `tools/recomp/functions.txt` to C++ (in `recomp/gen`, the ones listed in `tools/recomp/hot-functions.txt` apart from the others), compiles the VU1 micro programs listed in `tools/recomp/vu-blocks.idx` (in `recomp/vu`), and builds the four parts of the game's code from them (`codport_game.dll`, `codport_game_vu.dll`, `codport_game_hot.dll`, `codport_game_cold.dll`; what goes first is listed in `tools/recomp/boot-functions.txt`). It writes about 100 MB of code, which must not be shared.
 4. Run `build\codport.exe`. Started from a terminal, its messages show there.
 
 ## Controls
@@ -121,7 +121,7 @@ Saves go to the `memcard` folder. Each session is also recorded in `build/record
 ## Port Notes
 
 - `src/ee` - the PS2's main processor (R5900): a reference interpreter, memory, a reimplementation of the EE kernel, and the VU0 and VU1.
-- `src/recomp` - the MIPS to C++ recompiler, the compiler for the VU1 micro programs, and the loader of the game's code (`codport_game.dll`, `codport_game_cold.dll`, built on the player's computer).
+- `src/recomp` - the MIPS to C++ recompiler, the compiler for the VU1 micro programs, and the loader of the game's code (`codport_game*.dll`, built on the player's computer, also while the game runs).
 - `src/gs` - DMA, VIF, GIF and the GS: drawing with Direct3D 11 (`gpu.cpp`, `gpu_shaders.h`), plus a software rasterizer for comparison (`--software`).
 - `src/ipu` - the MPEG-2 decoder for the movies.
 - `src/iop` - the I/O processor's services (disc, memory card, controller) and an emulated IOP that runs the game's own sound modules on a model of the SPU2.
@@ -219,8 +219,8 @@ Baixe a versão mais recente na página **Releases** e extraia. Ela já vem com 
 
 Rode `Setup.bat`. Ele confere as ferramentas de compilação (e pode instalar o Visual Studio Build Tools gratuito para você), pede a imagem do seu disco e confere se é o jogo certo, e então gera o jogo a partir dela em duas partes:
 
-- **O código que o jogo roda** - traduzido do seu disco e compilado em `codport_game.dll` em cerca de um minuto (47 segundos num Core i5-14400F de 16 threads). Daí já dá para jogar, e há um atalho **Castlevania - Curse of Darkness** na área de trabalho, com o busto do Hector que o PS2 mostrava nos saves do jogo (também tirado do seu disco).
-- **O resto** - as funções que o jogo raramente usa, compiladas em `codport_game_cold.dll` em segundo plano, com prioridade baixa, por mais alguns minutos, mesmo que a janela do Setup seja fechada. Até lá essas funções rodam no interpretador, mais devagar.
+- **O que o jogo roda desde o início** - o código do boot, dos menus e de quase todo o tempo de jogo (escolhido pelo perfil de sessões gravadas), traduzido do seu disco e compilado em `codport_game.dll` em cerca de meio minuto (15 segundos nos seis núcleos de desempenho de um Core i5-14400F). Daí já dá para jogar, e há um atalho **Castlevania - Curse of Darkness** na área de trabalho, com o busto do Hector que o PS2 mostrava nos saves do jogo (também tirado do seu disco).
+- **O resto** - os microprogramas da VU1, o resto do que o jogo roda e as funções que ele raramente usa, compilados em `codport_game_vu.dll`, `codport_game_hot.dll` e `codport_game_cold.dll` em segundo plano, com prioridade baixa, por mais alguns minutos, mesmo que a janela do Setup seja fechada. Até cada parte ficar pronta, o código dela roda no interpretador, mais devagar, e um jogo já aberto passa a usá-la assim que ela é gerada.
 
 As duas partes são compiladas com otimização total, e o resultado é o mesmo código de compilar tudo de uma vez. Daí em diante o atalho, ou `build\codport.exe`, só abre o jogo. Ele não abre janela de console.
 
@@ -228,7 +228,7 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 
 1. Coloque a sua ISO na pasta do repositório (ou em qualquer pasta acima dela), ou deixe o jogo pedir por ela na primeira vez que abrir; o caminho fica guardado no `codport.ini`.
 2. Rode `build.bat`. Isso compila o port sozinho; ele já roda o jogo, mas interpretando o código MIPS, devagar.
-3. Rode `recompile.bat`. Ele lê o executável do jogo na sua ISO, traduz para C++ as funções listadas em `tools/recomp/functions.txt` (em `recomp/gen`, as listadas em `tools/recomp/hot-functions.txt` separadas das outras), compila os microprogramas da VU1 listados em `tools/recomp/vu-blocks.idx` (em `recomp/vu`) e gera com eles `codport_game.dll` e `codport_game_cold.dll`. Ele gera cerca de 100 MB de código, que não deve ser compartilhado.
+3. Rode `recompile.bat`. Ele lê o executável do jogo na sua ISO, traduz para C++ as funções listadas em `tools/recomp/functions.txt` (em `recomp/gen`, as listadas em `tools/recomp/hot-functions.txt` separadas das outras), compila os microprogramas da VU1 listados em `tools/recomp/vu-blocks.idx` (em `recomp/vu`) e gera com eles as quatro partes do código do jogo (`codport_game.dll`, `codport_game_vu.dll`, `codport_game_hot.dll`, `codport_game_cold.dll`; o que vai primeiro está listado em `tools/recomp/boot-functions.txt`). Ele gera cerca de 100 MB de código, que não deve ser compartilhado.
 4. Rode `build\codport.exe`. Rodado de um terminal, as mensagens aparecem nele.
 
 ## Controles
@@ -276,7 +276,7 @@ Os saves ficam na pasta `memcard`. Cada sessão também é gravada em `build/rec
 ## Notas do Port
 
 - `src/ee` - o processador principal do PS2 (R5900): um interpretador de referência, a memória, uma reimplementação do kernel do EE, e as VU0 e VU1.
-- `src/recomp` - o recompilador de MIPS para C++, o compilador dos microprogramas da VU1, e o carregador do código do jogo (`codport_game.dll`, `codport_game_cold.dll`, gerados no computador de quem joga).
+- `src/recomp` - o recompilador de MIPS para C++, o compilador dos microprogramas da VU1, e o carregador do código do jogo (`codport_game*.dll`, gerados no computador de quem joga, também com o jogo aberto).
 - `src/gs` - DMA, VIF, GIF e o GS: desenho em Direct3D 11 (`gpu.cpp`, `gpu_shaders.h`), e um rasterizador em software para comparação (`--software`).
 - `src/ipu` - o decodificador de MPEG-2 dos vídeos.
 - `src/iop` - os serviços do processador de entrada e saída (disco, cartão de memória, controle) e um IOP emulado que roda os módulos de som do próprio jogo sobre um modelo do SPU2.

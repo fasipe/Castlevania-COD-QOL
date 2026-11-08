@@ -78,15 +78,19 @@ target_link_libraries(codport PRIVATE user32 gdi32 comctl32 comdlg32 dbghelp win
 set_target_properties(codport PROPERTIES ENABLE_EXPORTS ON)
 endif()
 
-# The functions the game runs (recomp/gen/hot) and the VU programs, built first; the other
-# functions (recomp/gen/cold) in a second DLL that can be built afterwards (see Setup.bat).
-if(EXISTS ${CMAKE_SOURCE_DIR}/recomp/gen/hot/table.cpp)
+# What the game runs from its start (recomp/gen/boot), built first so the game can start; then the
+# VU programs (recomp/vu), the rest of what it runs (recomp/gen/hot) and everything else
+# (recomp/gen/cold), each in a DLL of its own that the game loads once it is built (see Setup.bat).
+if(EXISTS ${CMAKE_SOURCE_DIR}/recomp/gen/boot/table.cpp)
+  file(GLOB BOOT_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/recomp/gen/boot/*.cpp)
   file(GLOB HOT_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/recomp/gen/hot/*.cpp)
   file(GLOB COLD_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/recomp/gen/cold/*.cpp)
   file(GLOB VU_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/recomp/vu/*.cpp)
-  add_library(codport_game SHARED ${HOT_SOURCES} ${VU_SOURCES})
+  add_library(codport_game SHARED ${BOOT_SOURCES})
+  add_library(codport_game_vu SHARED ${VU_SOURCES})
+  add_library(codport_game_hot SHARED ${HOT_SOURCES})
   add_library(codport_game_cold SHARED ${COLD_SOURCES})
-  foreach(game codport_game codport_game_cold)
+  foreach(game codport_game codport_game_vu codport_game_hot codport_game_cold)
     target_compile_definitions(${game} PRIVATE CODPORT_GAME_DLL)
     # Every generated file includes the same headers: parsed once.
     target_precompile_headers(${game} PRIVATE src/recomp/runtime.h src/ee/vu_ops.h)
@@ -100,6 +104,6 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/recomp/gen/hot/table.cpp)
     endif()
   endforeach()
   if(MSVC)
-    set_source_files_properties(${HOT_SOURCES} ${COLD_SOURCES} ${VU_SOURCES} PROPERTIES COMPILE_OPTIONS "/bigobj;/wd4102;/wd4065")
+    set_source_files_properties(${BOOT_SOURCES} ${HOT_SOURCES} ${COLD_SOURCES} ${VU_SOURCES} PROPERTIES COMPILE_OPTIONS "/bigobj;/wd4102;/wd4065")
   endif()
 endif()
