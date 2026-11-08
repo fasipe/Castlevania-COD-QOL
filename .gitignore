@@ -1,0 +1,18 @@
+# Dados do jogo extraídos da ISO original: nunca versionar
+/gamedata/
+# Projeto do Ghidra (gerado localmente)
+/ghidra/
+# Saída de build
+/build/
+/out/
+*.log
+# Saves do cartao de memoria do jogador
+/memcard/
+# Codigo do jogo recompilado (gerado a partir do executavel original)
+/recomp/
+
+# Configuracoes do jogador
+/codport.ini
+
+# Imagens de disco do jogo
+*.iso
