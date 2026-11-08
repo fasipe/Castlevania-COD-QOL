@@ -21,7 +21,7 @@ This is a personal, non-commercial fan project. It is not affiliated with or end
 - **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off.
 - **Any screen size** - full screen at the monitor's own resolution, or a window sized for 1080p, 1440p, 4K or ultrawide screens, the picture kept in proportion with black bars.
 - **Keyboard and Xbox controller** - XInput controllers work out of the box, and an optional frame counter shows performance (**F9**).
-- **Camera with the mouse** - playing on the keyboard, the mouse turns the camera, with its sensitivity and an inverted vertical axis in **F1**. A click in the window holds the cursor there; **Esc** lets it go.
+- **Keyboard and mouse** - W/A/S/D move Hector, the mouse turns the camera directly (no lag, its sensitivity and an inverted vertical axis in **F1**), and its left and right buttons attack. A click in the window holds the cursor there; **Esc** lets it go.
 
 ## Required Game Version
 
@@ -78,23 +78,24 @@ Both parts are compiled with full optimization, and the same code results as bui
 
 ## Controls
 
-### Keyboard
+### Keyboard and Mouse
 
 | Action | Key |
 |---|---|
-| Move | Arrow keys |
+| Move | W / A / S / D |
 | Camera | Mouse, or I / J / K / L |
-| Attack | A |
-| Jump / Confirm | Z |
-| Final attack / Steal / Examine | X |
-| Innocent Devil ability / Back | S |
-| Guard | W |
+| Attack | Left mouse button |
+| Final attack / Steal / Examine | Right mouse button |
+| Jump / Confirm | Space |
+| Innocent Devil ability / Back | E |
+| Guard | F |
 | Lock on | 2 |
 | Change target | 1 |
 | Reset camera | Q |
 | Sprint | Shift |
-| Map | Backspace |
+| Map | Tab |
 | Menu | Enter |
+| Innocent Devil AI | Arrow keys |
 
 ### Controller
 
@@ -175,7 +176,7 @@ Este é um projeto de fã, pessoal e sem fins comerciais. Não tem relação nem
 - **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada.
 - **Qualquer tamanho de tela** - tela cheia na resolução do próprio monitor, ou janela em tamanhos para telas 1080p, 1440p, 4K ou ultrawide, com a imagem mantida na proporção por barras pretas.
 - **Teclado e controle Xbox** - controles XInput funcionam direto, e um contador de quadros opcional mostra o desempenho (**F9**).
-- **Câmera com o mouse** - jogando no teclado, o mouse gira a câmera, com sensibilidade e vertical invertido no **F1**. Um clique na janela prende o cursor nela; o **Esc** solta.
+- **Teclado e mouse** - W/A/S/D movem o Hector, o mouse gira a câmera direto (sem atraso, com sensibilidade e vertical invertido no **F1**) e seus botões esquerdo e direito atacam. Um clique na janela prende o cursor nela; o **Esc** solta.
 
 ## Versão Necessária do Jogo
 
@@ -232,23 +233,24 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 
 ## Controles
 
-### Teclado
+### Teclado e Mouse
 
 | Ação | Tecla |
 |---|---|
-| Andar | Setas |
+| Andar | W / A / S / D |
 | Câmera | Mouse, ou I / J / K / L |
-| Atacar | A |
-| Pular / Confirmar | Z |
-| Golpe final / Roubar / Examinar | X |
-| Habilidade do Innocent Devil / Voltar | S |
-| Defender | W |
+| Atacar | Botão esquerdo do mouse |
+| Golpe final / Roubar / Examinar | Botão direito do mouse |
+| Pular / Confirmar | Espaço |
+| Habilidade do Innocent Devil / Voltar | E |
+| Defender | F |
 | Travar no alvo | 2 |
 | Trocar de alvo | 1 |
 | Centralizar a câmera | Q |
 | Sprint | Shift |
-| Mapa | Backspace |
+| Mapa | Tab |
 | Menu | Enter |
+| IA do Innocent Devil | Setas |
 
 ### Controle
 

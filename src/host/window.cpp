@@ -52,6 +52,8 @@ void toggleFullscreen(HWND hwnd) {
 }
 PadInput gKeyboard;
 
+void setKey(int vk, bool down);
+
 // The mouse turns the camera while the window holds it: the cursor hidden and kept inside, its
 // motion read raw (no pointer acceleration) and added up until the frame takes it. A click in the
 // window holds it; Esc, F1 or another window lets it go.
@@ -70,10 +72,16 @@ void holdMouse(HWND hwnd, bool on) {
   }
   if (on != gMouseHeld) {
     gMouseHeld = on;
+    if (!on)  // its buttons are let go with it
+      for (int vk : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON}) setKey(vk, false);
     gMouseX = 0, gMouseY = 0;
     // The cursor: hidden over the window while held (and in WM_SETCURSOR), shown again when let go.
     SetCursor(on ? nullptr : LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW)));
   }
+}
+
+int mouseButton(UINT msg) {
+  return msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP ? VK_LBUTTON : msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP ? VK_RBUTTON : VK_MBUTTON;
 }
 
 bool cursorInside(HWND hwnd) {
@@ -149,7 +157,13 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ACTIVATE:  // back by keyboard (Alt+Tab) with the cursor over the game: held again
       if (LOWORD(wp) == WA_ACTIVE && cursorInside(hwnd)) holdMouse(hwnd, true);
       break;
-    case WM_LBUTTONDOWN: holdMouse(hwnd, true); return 0;
+    // Mouse buttons are controls like keys, while the window holds the mouse (or the mouse does
+    // not turn the camera); a click that makes the window hold it only does that.
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:
+      if (gMouseHeld || !settings().mouseCamera) setKey(mouseButton(msg), true);
+      else holdMouse(hwnd, true);
+      return 0;
+    case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: setKey(mouseButton(msg), false); return 0;
     case WM_SIZE: case WM_MOVE:
       if (gMouseHeld) holdMouse(hwnd, true);  // the cursor's bounds follow the window
       break;

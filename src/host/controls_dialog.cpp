@@ -54,6 +54,7 @@ struct Dialog {
   bool capturing = false;
   int control = -1;
   bool keysAtStart[256] = {};
+  bool ignoreClick = false;  // the click that chose a mouse button is not a click on the list
   uint16_t padAtStart = 0;
   bool done = false;
 };
@@ -104,7 +105,7 @@ void startCapture() {
   for (int vk = 0; vk < 256; ++vk) d.keysAtStart[vk] = GetAsyncKeyState(vk) & 0x8000;
   d.padAtStart = padHeld();
   const std::wstring name = widen(Settings::label(c));
-  setHint((c < Settings::kButtons ? L"Aperte a tecla ou o botão do controle para \"" + name + L"\" (Esc cancela)."
+  setHint((c < Settings::kButtons ? L"Aperte a tecla, o botão do controle ou clique aqui na lista com o botão do mouse para \"" + name + L"\" (Esc cancela)."
                                   : L"Aperte a tecla para \"" + name + L"\"; no controle é sempre o analógico (Esc cancela).").c_str());
   SetTimer(d.wnd, 1, 15, nullptr);
 }
@@ -133,6 +134,18 @@ void finishAssigned(bool isKey) {
 void pollCapture() {
   Dialog& d = *gDialog;
   Settings& s = settings();
+  // Mouse buttons count when clicked over the list (elsewhere they are clicks on the window).
+  for (int vk : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON}) {
+    const bool held = GetAsyncKeyState(vk) & 0x8000;
+    if (!held) d.keysAtStart[vk] = false;
+    if (!held || d.keysAtStart[vk]) continue;
+    POINT pt;
+    GetCursorPos(&pt);
+    if (WindowFromPoint(pt) != d.list) continue;
+    s.keys[d.control] = uint8_t(vk);
+    d.ignoreClick = vk == VK_LBUTTON;
+    return finishAssigned(true);
+  }
   for (int vk = 8; vk < 256; ++vk) {
     const bool held = GetAsyncKeyState(vk) & 0x8000;
     if (!held) d.keysAtStart[vk] = false;
@@ -360,7 +373,10 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     case WM_NOTIFY: {
       const NMHDR* n = reinterpret_cast<const NMHDR*>(lp);
-      if (n->idFrom == kList && (n->code == NM_CLICK || n->code == NM_RETURN)) startCapture();
+      if (n->idFrom == kList && (n->code == NM_CLICK || n->code == NM_RETURN)) {
+        if (gDialog->ignoreClick && n->code == NM_CLICK) gDialog->ignoreClick = false;
+        else startCapture();
+      }
       if (n->idFrom == kTabs && n->code == TCN_SELCHANGE) {
         if (gDialog->capturing) finishCapture(L"");
         showPage(int(SendMessageW(gDialog->tabs, TCM_GETCURSEL, 0, 0)));

@@ -58,6 +58,7 @@ constexpr Named kKeyNames[] = {
     {VK_OEM_2, ";"},        {VK_OEM_3, "'"},        {VK_OEM_4, "´"},          {VK_OEM_5, "]"},
     {VK_OEM_6, "["},        {VK_OEM_7, "~"},        {VK_LSHIFT, "ShiftEsq"},  {VK_RSHIFT, "ShiftDir"},
     {VK_LCONTROL, "CtrlEsq"}, {VK_RCONTROL, "CtrlDir"},
+    {VK_LBUTTON, "MouseEsq"}, {VK_RBUTTON, "MouseDir"}, {VK_MBUTTON, "MouseMeio"},
 };
 constexpr Named kPadNames[] = {
     {XINPUT_GAMEPAD_A, "A"},           {XINPUT_GAMEPAD_B, "B"},          {XINPUT_GAMEPAD_X, "X"},
@@ -111,11 +112,13 @@ uint16_t padFromName(const std::string& name) {
 
 Settings Settings::defaults() {
   Settings s;
-  // Keyboard: arrows = D-pad and left stick (Hector moves with the stick, menus use the D-pad),
-  // I/J/K/L = right stick (camera), Enter = START, Backspace = SELECT, Z/X/A/S = cross/circle/
-  // square/triangle, Q/W = L1/R1, 1/2 = L2/R2, Shift = L3 (the sprint).
-  s.keys = {VK_BACK, VK_SHIFT, 0,   VK_RETURN, VK_UP, VK_RIGHT, VK_DOWN, VK_LEFT, '1', '2', 'Q', 'W',
-            'S',     'X', 'Z', 'A',       VK_UP, VK_DOWN,  VK_LEFT, VK_RIGHT, 'I', 'K', 'J', 'L'};
+  // Keyboard and mouse, for a hand on W/A/S/D and the other on the mouse: W/A/S/D = left stick
+  // (Hector moves with it), the mouse turns the camera (and I/J/K/L = right stick), left and right
+  // buttons = square and circle (the attack and the final attack), Space = cross, E = triangle,
+  // F = R1 (guard), Q = L1, 1/2 = L2/R2, Shift = L3 (the sprint), Tab = SELECT (the map), Enter =
+  // START, arrows = D-pad (the Innocent Devil's AI, and menus).
+  s.keys = {VK_TAB, VK_SHIFT, 0,   VK_RETURN, VK_UP, VK_RIGHT, VK_DOWN, VK_LEFT, '1', '2', 'Q', 'F',
+            'E',    VK_RBUTTON, VK_SPACE, VK_LBUTTON, 'W', 'S', 'A', 'D', 'I', 'K', 'J', 'L'};
   // Xbox layout onto the DualShock: A = cross, B = circle, X = square, Y = triangle.
   s.pad = {XINPUT_GAMEPAD_BACK,      XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_GAMEPAD_START,
            XINPUT_GAMEPAD_DPAD_UP,   XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_DPAD_DOWN,   XINPUT_GAMEPAD_DPAD_LEFT,
