@@ -6,6 +6,8 @@ An unofficial native Windows port of **Castlevania: Curse of Darkness** (PlaySta
 
 This is a personal, non-commercial fan project. It is not affiliated with or endorsed by Konami or Sony.
 
+The port is made with the help of AI (Anthropic's Claude). Every change is tested before it is released: played in the game itself, and checked by replaying recorded play sessions and comparing their frames, which must stay identical wherever the change is not meant to alter the picture.
+
 > [!IMPORTANT]
 > **You need your own copy of the game.** This repository contains no game files: no disc image, no executable, no graphics, sound or movies, and no code generated from the game. Everything is read from your own disc image, on your own computer, when you build and play.
 
@@ -164,6 +166,8 @@ The port's own code is under the MIT license (see `LICENSE`). It covers none of 
 Um port nativo e não oficial para Windows de **Castlevania: Curse of Darkness** (PlayStation 2), feito por recompilação estática: o código MIPS do jogo é traduzido para C++ e compilado para x64, e o que o PS2 faz em hardware (o GS, a VU1, o DMA, a IPU, o IOP, o SPU2, o leitor de DVD e o controle) é reescrito como código de PC. Não é um emulador genérico; ele roda só este jogo.
 
 Este é um projeto de fã, pessoal e sem fins comerciais. Não tem relação nem aprovação da Konami ou da Sony.
+
+O port é feito com a ajuda de IA (o Claude, da Anthropic). Cada alteração é testada antes de ser lançada: jogada no próprio jogo e conferida reproduzindo sessões de jogo gravadas e comparando os quadros, que precisam continuar idênticos onde a alteração não deve mudar a imagem.
 
 > [!IMPORTANT]
 > **Você precisa da sua própria cópia do jogo.** Este repositório não contém nenhum arquivo do jogo: nem imagem de disco, nem executável, nem gráficos, sons ou vídeos, nem código gerado a partir do jogo. Tudo é lido da imagem do seu próprio disco, no seu computador, na hora de compilar e de jogar.
