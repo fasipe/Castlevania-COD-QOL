@@ -63,7 +63,7 @@ Download the latest release from the **Releases** page and extract it. It comes 
 
 Run `Setup.bat`. It checks the build tools (and can install the free Visual Studio Build Tools for you), asks for the image of your disc and checks that it is the right game, then builds the game from it in two parts:
 
-- **The code the game runs** - translated from your disc and compiled into `codport_game.dll` in about a minute (47 seconds on a 16-thread Core i5-14400F). Then the game can be played, and a **Castlevania - Curse of Darkness** shortcut is on the desktop.
+- **The code the game runs** - translated from your disc and compiled into `codport_game.dll` in about a minute (47 seconds on a 16-thread Core i5-14400F). Then the game can be played, and a **Castlevania - Curse of Darkness** shortcut is on the desktop, with the bust of Hector that the PS2 showed for the game's saves (drawn from your disc as well).
 - **Everything else** - the functions the game seldom runs, compiled into `codport_game_cold.dll` in the background, at a low priority, for a couple more minutes, even if the setup window is closed. Until then those functions run on the interpreter, more slowly.
 
 Both parts are compiled with full optimization, and the same code results as building it all at once. From then on the shortcut, or `build\codport.exe`, just opens the game. It opens no console window.
@@ -215,7 +215,7 @@ Baixe a versão mais recente na página **Releases** e extraia. Ela já vem com 
 
 Rode `Setup.bat`. Ele confere as ferramentas de compilação (e pode instalar o Visual Studio Build Tools gratuito para você), pede a imagem do seu disco e confere se é o jogo certo, e então gera o jogo a partir dela em duas partes:
 
-- **O código que o jogo roda** - traduzido do seu disco e compilado em `codport_game.dll` em cerca de um minuto (47 segundos num Core i5-14400F de 16 threads). Daí já dá para jogar, e há um atalho **Castlevania - Curse of Darkness** na área de trabalho.
+- **O código que o jogo roda** - traduzido do seu disco e compilado em `codport_game.dll` em cerca de um minuto (47 segundos num Core i5-14400F de 16 threads). Daí já dá para jogar, e há um atalho **Castlevania - Curse of Darkness** na área de trabalho, com o busto do Hector que o PS2 mostrava nos saves do jogo (também tirado do seu disco).
 - **O resto** - as funções que o jogo raramente usa, compiladas em `codport_game_cold.dll` em segundo plano, com prioridade baixa, por mais alguns minutos, mesmo que a janela do Setup seja fechada. Até lá essas funções rodam no interpretador, mais devagar.
 
 As duas partes são compiladas com otimização total, e o resultado é o mesmo código de compilar tudo de uma vez. Daí em diante o atalho, ou `build\codport.exe`, só abre o jogo. Ele não abre janela de console.

@@ -209,6 +209,8 @@ $timer.Add_Tick({
       $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Castlevania - Curse of Darkness.lnk'))
       $link.TargetPath = $exe
       $link.WorkingDirectory = Split-Path $exe
+      $icon = Join-Path $root 'build\castlevania.ico'
+      if (Test-Path $icon) { $link.IconLocation = "$icon,0" }
       $link.Save()
       $progress.Text = T 'Ready to play. Finishing the rest in the background.' 'Pronto para jogar. O resto termina em segundo plano.'
       $output.AppendText((T "`r`n--- The game can be played now (shortcut on the desktop). The functions it seldom runs are still being optimized, at low priority; until then they run more slowly. This window can be closed.`r`n`r`n" "`r`n--- Já dá para jogar (atalho na área de trabalho). As funções que o jogo raramente usa ainda estão sendo otimizadas, com prioridade baixa; até lá elas rodam mais devagar. Esta janela pode ser fechada.`r`n`r`n"))

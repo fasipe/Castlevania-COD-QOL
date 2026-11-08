@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "host/controls_dialog.h"
+#include "host/icon.h"
 #include "host/settings.h"
 #include "iop/pad.h"
 
@@ -299,6 +300,13 @@ bool Window::create(const wchar_t* title, int width, int height) {
   wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
   wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
   wc.lpszClassName = L"codport";
+  // The icon drawn from the disc (host/icon.h), if it was.
+  const std::wstring icon = iconFile().wstring();
+  auto loadIcon = [&](int metric) {
+    return static_cast<HICON>(LoadImageW(nullptr, icon.c_str(), IMAGE_ICON, GetSystemMetrics(metric), GetSystemMetrics(metric),
+                                         LR_LOADFROMFILE));
+  };
+  wc.hIcon = loadIcon(SM_CXICON);
   RegisterClassW(&wc);
   HWND hwnd = CreateWindowW(L"codport", title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, nullptr, nullptr,
                             wc.hInstance, nullptr);
@@ -307,6 +315,7 @@ bool Window::create(const wchar_t* title, int width, int height) {
     SetWindowPos(hwnd, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOOWNERZORDER);
     ShowWindow(hwnd, SW_SHOW);
   }
+  if (HICON small = hwnd ? loadIcon(SM_CXSMICON) : nullptr) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, LPARAM(small));
   hwnd_ = hwnd;
   gTitle = title;
   if (!hwnd) return false;

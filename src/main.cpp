@@ -24,6 +24,7 @@
 #include "gs/graphics.h"
 #include "host/audio.h"
 #include "host/gamepad.h"
+#include "host/icon.h"
 #include "host/settings.h"
 #include "game/attack_turn.h"
 #include "game/loading.h"
@@ -67,6 +68,7 @@ void usage() {
       "  --attack-turn    attacks turn to the locked enemy in a replay of a recording made without it\n"
       "  --sprint         L3 sprints in a replay of a recording made without it\n"
       "  --recompile L D  translate the functions listed in L (Ghidra export) to C++ in folder D\n"
+      "  --make-icon F    draw the program's icon (the game's memory card icon, from the disc) into F\n"
       "  --only F         with --recompile: only the functions whose addresses are in F\n"
       "  --vu-recompile B D  compile the VU micro-program blocks in B (files separated by ';') to C++ in D: collected\n"
       "                   (CODPORT_VU_COLLECT), or an index of where they are in the game's executable (tools/recomp/vu-blocks.idx)");
@@ -149,7 +151,7 @@ int main(int argc, char** argv) {
     std::string file;
   };
   std::vector<MemDump> memDumps;  // EE memory ranges saved to files at the end (debugging)
-  fs::path recompileList, recompileOut, recompileOnly, vuBlocksFile, vuOut;
+  fs::path recompileList, recompileOut, recompileOnly, vuBlocksFile, vuOut, iconOut;
   std::string wavFile;  // the sound output, saved at the end
   fs::path replayFile;  // a recorded session to play back (build/recordings/*.txt)
   int scaleOption = 0;  // --scale: over the setting, for this run
@@ -205,6 +207,8 @@ int main(int argc, char** argv) {
     } else if (a == "--vu-recompile" && i + 2 < argc) {
       vuBlocksFile = argv[++i];
       vuOut = argv[++i];
+    } else if (a == "--make-icon" && i + 1 < argc) {
+      iconOut = argv[++i];
     } else if (a == "--only" && i + 1 < argc) {
       recompileOnly = argv[++i];
     } else if (a == "-h" || a == "--help") {
@@ -277,6 +281,15 @@ int main(int argc, char** argv) {
   for (const auto& seg : elf.segments)
     std::printf("load:  0x%08X  file 0x%06X  mem 0x%06X\n", seg.vaddr, seg.fileSize, seg.memSize);
   std::printf("entry: 0x%08X\n\n", elf.entry);
+
+  if (!iconOut.empty()) {
+    if (!makeIcon(iso, iconOut, error)) {
+      std::printf("error: %s\n", error.c_str());
+      return 1;
+    }
+    return 0;
+  }
+  if (!headless && !fs::exists(iconFile())) makeIcon(iso, iconFile(), error);  // for the window
 
   if (!vuBlocksFile.empty()) {
     std::vector<fs::path> files;  // separated by ';'

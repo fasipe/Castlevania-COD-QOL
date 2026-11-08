@@ -46,6 +46,7 @@ set(SOURCES
   src/host/gamepad.cpp
   src/host/settings.cpp
   src/host/controls_dialog.cpp
+  src/host/icon.cpp
   src/game/attack_turn.cpp
   src/game/minimap.cpp
   src/game/sprint.cpp
