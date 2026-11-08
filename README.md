@@ -29,7 +29,7 @@ The port is made with the help of AI (Anthropic's Claude). Every change is teste
 - **Sprint** - pressing **L3** while running makes Hector run faster, with its own pose: the torso leans forward, the strides lengthen and the arms swing wider.
 - **Attacks turn to the target** - with an enemy locked on, attacks turn toward it.
 - **Fast loading** - doors and Loading screens no longer wait for real time. The music pauses during them.
-- **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off.
+- **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off. It is in English or Portuguese, chosen in the window itself (by default, the language of Windows).
 - **Any screen size** - full screen at the monitor's own resolution, or a window sized for 1080p, 1440p, 4K or ultrawide screens, the picture kept in proportion with black bars.
 - **Keyboard and Xbox controller** - XInput controllers work out of the box, and an optional frame counter shows performance (**F9**).
 - **Keyboard and mouse** - W/A/S/D move Hector, the mouse turns the camera directly (no lag, its sensitivity and an inverted vertical axis in **F1**), and its left and right buttons attack. A click in the window holds the cursor there; **Esc** lets it go.
@@ -198,7 +198,7 @@ O port é feito com a ajuda de IA (o Claude, da Anthropic). Cada alteração é 
 - **Sprint** - apertar **L3** enquanto corre faz o Hector correr mais rápido, com pose própria: o tronco inclina, as passadas ficam mais longas e os braços balançam mais.
 - **Ataques no alvo** - com um inimigo travado, os ataques viram na direção dele.
 - **Carregamento rápido** - portas e telas de Loading não esperam mais o tempo real. A música pausa durante eles.
-- **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada.
+- **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada. Ela fica em português ou inglês, escolhido na própria janela (por padrão, o idioma do Windows).
 - **Qualquer tamanho de tela** - tela cheia na resolução do próprio monitor, ou janela em tamanhos para telas 1080p, 1440p, 4K ou ultrawide, com a imagem mantida na proporção por barras pretas.
 - **Teclado e controle Xbox** - controles XInput funcionam direto, e um contador de quadros opcional mostra o desempenho (**F9**).
 - **Teclado e mouse** - W/A/S/D movem o Hector, o mouse gira a câmera direto (sem atraso, com sensibilidade e vertical invertido no **F1**) e seus botões esquerdo e direito atacam. Um clique na janela prende o cursor nela; o **Esc** solta.
