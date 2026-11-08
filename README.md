@@ -64,7 +64,7 @@ Download the latest release from the **Releases** page and extract it. It comes 
 
 ### 3. Run the Setup
 
-Run `Setup.bat`. It checks the build tools (and can install the free Visual Studio Build Tools for you), asks for the image of your disc and checks that it is the right game, then builds the game from it in two parts:
+Run `Setup.exe` (`Setup.bat` in a clone of the repository). It checks the build tools (and can install the free Visual Studio Build Tools for you), asks for the image of your disc and checks that it is the right game, then builds the game from it in two parts:
 
 - **What the game runs from its start** - the code for the boot, the menus and nearly all of the time in play (picked by profiling recorded sessions), translated from your disc and compiled into `codport_game.dll` in about half a minute (15 seconds on the six performance cores of a Core i5-14400F). Then the game can be played, and a **Castlevania - Curse of Darkness** shortcut is on the desktop, with the bust of Hector that the PS2 showed for the game's saves (drawn from your disc as well).
 - **Everything else** - the VU1 micro programs, the rest of what the game runs and the functions it seldom runs, compiled into `codport_game_vu.dll`, `codport_game_hot.dll` and `codport_game_cold.dll` in the background, at a low priority, for a few more minutes, even if the setup window is closed. Until each part is there its code runs on the interpreter, more slowly, and a game already open starts using it as soon as it is built.
@@ -225,7 +225,7 @@ Baixe a versão mais recente na página **Releases** e extraia. Ela já vem com 
 
 ### 3. Rode o Setup
 
-Rode `Setup.bat`. Ele confere as ferramentas de compilação (e pode instalar o Visual Studio Build Tools gratuito para você), pede a imagem do seu disco e confere se é o jogo certo, e então gera o jogo a partir dela em duas partes:
+Rode o `Setup.exe` (`Setup.bat` num clone do repositório). Ele confere as ferramentas de compilação (e pode instalar o Visual Studio Build Tools gratuito para você), pede a imagem do seu disco e confere se é o jogo certo, e então gera o jogo a partir dela em duas partes:
 
 - **O que o jogo roda desde o início** - o código do boot, dos menus e de quase todo o tempo de jogo (escolhido pelo perfil de sessões gravadas), traduzido do seu disco e compilado em `codport_game.dll` em cerca de meio minuto (15 segundos nos seis núcleos de desempenho de um Core i5-14400F). Daí já dá para jogar, e há um atalho **Castlevania - Curse of Darkness** na área de trabalho, com o busto do Hector que o PS2 mostrava nos saves do jogo (também tirado do seu disco).
 - **O resto** - os microprogramas da VU1, o resto do que o jogo roda e as funções que ele raramente usa, compilados em `codport_game_vu.dll`, `codport_game_hot.dll` e `codport_game_cold.dll` em segundo plano, com prioridade baixa, por mais alguns minutos, mesmo que a janela do Setup seja fechada. Até cada parte ficar pronta, o código dela roda no interpretador, mais devagar, e um jogo já aberto passa a usá-la assim que ela é gerada.

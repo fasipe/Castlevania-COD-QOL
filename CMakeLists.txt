@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(codport LANGUAGES CXX)
+project(codport LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,7 +56,7 @@ set(SOURCES
 )
 option(CODPORT_GAME_ONLY "Build only codport_game.dll, next to a codport.exe and codport.lib already built" OFF)
 if(NOT CODPORT_GAME_ONLY)
-add_executable(codport ${SOURCES} src/recomp/gamecode.cpp)
+add_executable(codport ${SOURCES} src/recomp/gamecode.cpp tools/setup/icon.rc)
 if(MSVC)
   # Debug information for the hand-written code (not the generated code: too large), so that
   # the sampling profiler (CODPORT_SAMPLE) can name source lines.
@@ -76,6 +76,9 @@ target_link_libraries(codport PRIVATE user32 gdi32 comctl32 comdlg32 dbghelp win
 # `--vu-recompile`, see recompile.bat), loaded at start (src/recomp/gamecode.cpp). codport.exe
 # exports what it uses (CODPORT_API) and its import library, codport.lib, is what the DLL links.
 set_target_properties(codport PROPERTIES ENABLE_EXPORTS ON)
+
+# Setup.exe: opens the setup window (tools/setup/setup.ps1) as Setup.bat does, with an icon.
+add_executable(Setup WIN32 tools/setup/launcher.cpp tools/setup/icon.rc)
 endif()
 
 # What the game runs from its start (recomp/gen/boot), built first so the game can start; then the

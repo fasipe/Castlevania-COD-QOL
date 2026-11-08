@@ -1,5 +1,5 @@
 ﻿# Setup for codport: checks the build tools, takes the player's disc image, builds and recompiles
-# the game from it, and puts a shortcut on the desktop. Run by Setup.bat.
+# the game from it, and puts a shortcut on the desktop. Run by Setup.exe (or Setup.bat).
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -65,6 +65,7 @@ function AllReady { (Ready) -and (Test-Path (Join-Path $root 'build\codport_game
 # The window.
 $form = New-Object Windows.Forms.Form
 $form.Text = 'Castlevania: Curse of Darkness - Setup'
+try { $form.Icon = New-Object Drawing.Icon (Join-Path $PSScriptRoot 'setup.ico') } catch {}
 $form.ClientSize = New-Object Drawing.Size(640, 520)
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false

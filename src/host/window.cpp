@@ -379,8 +379,10 @@ bool Window::create(const wchar_t* title, int width, int height) {
   // The icon drawn from the disc (host/icon.h), if it was.
   const std::wstring icon = iconFile().wstring();
   auto loadIcon = [&](int metric) {
-    return static_cast<HICON>(LoadImageW(nullptr, icon.c_str(), IMAGE_ICON, GetSystemMetrics(metric), GetSystemMetrics(metric),
-                                         LR_LOADFROMFILE));
+    const int size = GetSystemMetrics(metric);
+    if (auto h = static_cast<HICON>(LoadImageW(nullptr, icon.c_str(), IMAGE_ICON, size, size, LR_LOADFROMFILE))) return h;
+    // Else the program's own (tools/setup/setup.ico).
+    return static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, 0));
   };
   wc.hIcon = loadIcon(SM_CXICON);
   RegisterClassW(&wc);
