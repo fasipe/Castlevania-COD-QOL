@@ -49,6 +49,7 @@ set(SOURCES
   src/host/icon.cpp
   src/game/attack_turn.cpp
   src/game/minimap.cpp
+  src/game/mouse_camera.cpp
   src/game/sprint.cpp
   src/game/widescreen.cpp
   src/recomp/vu_generator.cpp

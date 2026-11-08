@@ -29,6 +29,7 @@
 #include "game/attack_turn.h"
 #include "game/loading.h"
 #include "game/minimap.h"
+#include "game/mouse_camera.h"
 #include "game/sprint.h"
 #include "game/widescreen.h"
 #include "host/sampler.h"
@@ -326,6 +327,7 @@ int main(int argc, char** argv) {
     installWidescreen(cpu);
     installAttackTurn(cpu);
     installSprint(cpu);
+    installMouseCamera(cpu);
     if (!headless) installMinimap(iso);
   }
   std::unordered_map<uint32_t, uint64_t> profile;
@@ -379,6 +381,8 @@ int main(int argc, char** argv) {
       if (!ls) continue;
       setPad(s.pad, uint16_t(b), 0);
       s.pad.lx = uint8_t(lx), s.pad.ly = uint8_t(ly), s.pad.rx = uint8_t(rx), s.pad.ry = uint8_t(ry);
+      float yaw = 0, pitch = 0;  // the mouse's camera turn, on the frames it moved
+      if (ls >> std::dec >> yaw >> pitch) s.pad.turnYaw = yaw, s.pad.turnPitch = pitch;
       replay.push_back(s);
     }
     const fs::path card = replayFile.parent_path() / (replayFile.stem().string() + "-memcard");
@@ -493,13 +497,18 @@ int main(int argc, char** argv) {
       static PadInput last{};
       static bool first = true;
       const PadInput& p = gPadInput;
-      if (first || p.buttons != last.buttons || p.lx != last.lx || p.ly != last.ly || p.rx != last.rx || p.ry != last.ry) {
+      const bool turned = p.turnYaw != 0 || p.turnPitch != 0;
+      if (first || turned || p.buttons != last.buttons || p.lx != last.lx || p.ly != last.ly || p.rx != last.rx || p.ry != last.ry) {
         recording << std::dec << n << ' ' << std::hex << p.buttons << ' ' << unsigned(p.lx) << ' ' << unsigned(p.ly) << ' '
-                  << unsigned(p.rx) << ' ' << unsigned(p.ry) << '\n';
+                  << unsigned(p.rx) << ' ' << unsigned(p.ry);
+        if (turned) recording << std::dec << ' ' << std::format("{} {}", p.turnYaw, p.turnPitch);  // exact (shortest round trip)
+        recording << '\n';
         recording.flush();
         last = p, first = false;
       }
     }
+    queueCameraTurn(gPadInput.turnYaw, gPadInput.turnPitch);
+    gPadInput.turnYaw = gPadInput.turnPitch = 0;
     uint32_t w = 0, h = 0;
     if (dumpEvery && n >= dumpFrom && n % dumpEvery == 0) {  // exact picture of this VBlank
       gfx.vblank(false);

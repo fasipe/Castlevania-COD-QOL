@@ -34,40 +34,17 @@ void stick(SHORT sx, SHORT sy, SHORT deadZone, uint8_t& outX, uint8_t& outY) {
   outX = toPs2(ux), outY = toPs2(uy);
 }
 
-// The mouse as the right stick. The game turns the camera at a rate set by how far the stick is
-// pushed: nothing up to 0x30 from the centre, then 0.0155 degrees a frame more for each step, 1.27
-// at the end (measured on the camera's matrix at 0x130C80, PAL). The mouse's motion this frame,
-// as an angle, becomes the push that turns that much this frame; what is past the stick's end is
-// kept for the next frames (up to a limit), so a quick swipe still turns the whole way.
-constexpr int kDeadZone = 0x30, kSteps = 0x7F - kDeadZone;
-constexpr double kDegreesPerStep = 0.0155, kMaxPending = 20;
-
-uint8_t mouseAxis(double& pending, double degrees) {
-  pending = std::clamp(pending + degrees, -kMaxPending, kMaxPending);
-  const int steps = std::min(int(std::lround(std::fabs(pending) / kDegreesPerStep)), kSteps);
-  if (steps == 0) {
-    pending = 0;
-    return 0x80;
-  }
-  const int sign = pending < 0 ? -1 : 1;
-  pending -= sign * steps * kDegreesPerStep;
-  return uint8_t(std::clamp(0x80 + sign * (kDeadZone + steps), 0, 255));
-}
-
+// The mouse's motion this frame as a turn of the camera (game/mouse_camera.h): sensitivity 5 is
+// 0.075 degrees a count, 60 degrees an inch at 800 counts an inch. Right turns the view right,
+// forward looks up (unless inverted).
 void applyMouse(PadInput& in) {
-  static double pendingX = 0, pendingY = 0;
   int dx, dy;
   takeMouseMotion(dx, dy);
   const Settings& s = settings();
-  if (!s.mouseCamera || in.rx != 0x80 || in.ry != 0x80) {  // the stick or keys turn it themselves
-    pendingX = pendingY = 0;
-    return;
-  }
-  // Sensitivity 5: 0.075 degrees a count, 60 degrees an inch at 800 counts an inch. Up is the
-  // stick down (it lowers the camera, which looks up), unless inverted.
-  const double perCount = 0.015 * std::clamp(s.mouseSensitivity, 1, 10);
-  in.rx = mouseAxis(pendingX, dx * perCount);
-  in.ry = mouseAxis(pendingY, (s.invertMouseY ? dy : -dy) * perCount);
+  if (!s.mouseCamera) return;
+  const float perCount = 0.015f * std::clamp(s.mouseSensitivity, 1, 10) * 3.14159265f / 180;
+  in.turnYaw = float(dx) * perCount;
+  in.turnPitch = float(s.invertMouseY ? dy : -dy) * perCount;
 }
 }  // namespace
 
