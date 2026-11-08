@@ -31,7 +31,7 @@ Do not open a public issue. Report it privately on the repository's **Security**
 - the steps to reproduce it, and a file that shows it if there is one (never a copy of the game's disc or its files);
 - what someone could do with it.
 
-This is a project kept in spare time: expect a first answer within about a week. If the report is confirmed, it is fixed in a new release and you are credited, unless you would rather not be. If it is declined, you get the reason.
+This is a project kept in spare time, so answers may take a while. If the report is confirmed, it is fixed in a new release and you are credited, unless you would rather not be. If it is declined, you get the reason.
 
 ## Staying Safe
 
@@ -73,7 +73,7 @@ Não abra uma issue pública. Relate em particular na aba **Security** do reposi
 - os passos para reproduzir, e um arquivo que mostre o problema se houver (nunca uma cópia do disco do jogo ou dos arquivos dele);
 - o que alguém conseguiria fazer com isso.
 
-Este é um projeto mantido no tempo livre: espere uma primeira resposta em cerca de uma semana. Se o relato for confirmado, a correção sai numa nova versão e você recebe o crédito, a não ser que prefira não receber. Se for recusado, você recebe o motivo.
+Este é um projeto mantido no tempo livre, então as respostas podem demorar. Se o relato for confirmado, a correção sai numa nova versão e você recebe o crédito, a não ser que prefira não receber. Se for recusado, você recebe o motivo.
 
 ## Para Se Manter Seguro
 
