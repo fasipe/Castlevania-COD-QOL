@@ -9,7 +9,16 @@ This is a personal, non-commercial fan project. It is not affiliated with or end
 The port is made with the help of AI (Anthropic's Claude). Every change is tested before it is released: played in the game itself, and checked by replaying recorded play sessions and comparing their frames, which must stay identical wherever the change is not meant to alter the picture.
 
 > [!IMPORTANT]
-> **You need your own copy of the game.** This repository contains no game files: no disc image, no executable, no graphics, sound or movies, and no code generated from the game. Everything is read from your own disc image, on your own computer, when you build and play.
+> **You need your own copy of the game.** This repository contains no game files: no disc image, no executable, no graphics, sound or movies, and no code generated from the game (only the screenshots below, of the port running). Everything is read from your own disc image, on your own computer, when you build and play.
+
+## Screenshots
+
+![The same moment on the PS2 and in the port](docs/screenshots/comparison.jpg)
+
+| | |
+|---|---|
+| ![Boss fight at 4x resolution, 16:9](docs/screenshots/boss.jpg) | ![Effects at 4x resolution](docs/screenshots/effects.jpg) |
+| ![Fire and magic at 4x resolution](docs/screenshots/fire.jpg) | ![The settings window (F1)](docs/screenshots/settings.png) |
 
 ## What This Port Adds
 
@@ -169,7 +178,16 @@ Este é um projeto de fã, pessoal e sem fins comerciais. Não tem relação nem
 O port é feito com a ajuda de IA (o Claude, da Anthropic). Cada alteração é testada antes de ser lançada: jogada no próprio jogo e conferida reproduzindo sessões de jogo gravadas e comparando os quadros, que precisam continuar idênticos onde a alteração não deve mudar a imagem.
 
 > [!IMPORTANT]
-> **Você precisa da sua própria cópia do jogo.** Este repositório não contém nenhum arquivo do jogo: nem imagem de disco, nem executável, nem gráficos, sons ou vídeos, nem código gerado a partir do jogo. Tudo é lido da imagem do seu próprio disco, no seu computador, na hora de compilar e de jogar.
+> **Você precisa da sua própria cópia do jogo.** Este repositório não contém nenhum arquivo do jogo: nem imagem de disco, nem executável, nem gráficos, sons ou vídeos, nem código gerado a partir do jogo (só as capturas abaixo, do port rodando). Tudo é lido da imagem do seu próprio disco, no seu computador, na hora de compilar e de jogar.
+
+## Capturas de Tela
+
+![O mesmo momento no PS2 e no port](docs/screenshots/comparison.jpg)
+
+| | |
+|---|---|
+| ![Luta contra chefe em resolução 4x, 16:9](docs/screenshots/boss.jpg) | ![Efeitos em resolução 4x](docs/screenshots/effects.jpg) |
+| ![Fogo e magia em resolução 4x](docs/screenshots/fire.jpg) | ![A janela de configurações (F1)](docs/screenshots/settings.png) |
 
 ## O Que Este Port Acrescenta
 
