@@ -139,6 +139,10 @@ Saves go to the `memcard` folder. Each session is also recorded in `build/record
 - During the sprint the feet can slide slightly on the ground, since the strides are longer than the game's animation.
 - Ultrawide screens show the 16:9 picture with black bars at the sides.
 
+## Ideas and Problems
+
+The [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) page is open to any idea of something to add or improve, not only to problems: a feature you miss, an option, a quality of life change. For a problem, say what happened, where in the game, and your CPU and graphics card. Security problems go privately through the **Security** tab instead (see `SECURITY.md`).
+
 ## Legal
 
 Castlevania and Castlevania: Curse of Darkness are trademarks of Konami. This project is not affiliated with Konami or Sony. Do not share disc images, the game's executable, files extracted from it, or the code generated from it (`recomp`, `codport_game*.dll`).
@@ -293,6 +297,10 @@ Os saves ficam na pasta `memcard`. Cada sessão também é gravada em `build/rec
 - O carregamento rápido pula o som desses momentos: a música pausa e o som da porta não toca. Ele pode ser desligado no **F1**.
 - Durante o sprint os pés podem deslizar um pouco no chão, porque as passadas são mais longas que as da animação do jogo.
 - Telas ultrawide mostram a imagem 16:9 com barras pretas nas laterais.
+
+## Ideias e Problemas
+
+A página de [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) está aberta para qualquer ideia de algo a acrescentar ou melhorar, não só para problemas: um recurso que faz falta, uma opção, uma melhoria de qualidade de vida. Para um problema, diga o que aconteceu, em que parte do jogo, e o seu processador e placa de vídeo. Problemas de segurança vão em particular pela aba **Security** (veja o `SECURITY.md`).
 
 ## Aviso Legal
 
