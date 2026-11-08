@@ -88,7 +88,8 @@ inline float ftoi(float v) {  // CVT.W.S: truncates, saturates
 inline void fcond(CpuState& s, bool c) { s.fcr31 = c ? (s.fcr31 | (1u << 23)) : (s.fcr31 & ~(1u << 23)); }
 
 // A macro-mode upper instruction: `op` is known, so only its own code is left.
-__forceinline void macroUpper(CpuState& s, uint32_t op) { vuUpper(VuRegs{s.vf, s.vi, &s.vacc}, op); }
+template <uint32_t K>
+__forceinline void macroUpper(CpuState& s, uint32_t op) { vuUpperK<K>(VuRegs{s.vf, s.vi, &s.vacc}, op); }
 
 // Runs one instruction through the interpreter (rare instructions, identical semantics).
 inline void interp(Cpu& c, uint32_t op, uint32_t pc) {

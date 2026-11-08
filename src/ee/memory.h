@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "codport_api.h"
 #include "ee/hardware.h"
 
 class Graphics;
@@ -13,7 +14,7 @@ class Graphics;
 // VU0/VU1 memory, and memory-mapped hardware registers. Registers without behaviour yet just
 // keep the last value written; every access is recorded so each milestone can see what the
 // game touches.
-class Memory {
+class CODPORT_API Memory {
 public:
   static constexpr uint32_t kRamSize = 32 * 1024 * 1024;
   static constexpr uint32_t kSprSize = 16 * 1024;

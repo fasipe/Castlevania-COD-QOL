@@ -234,6 +234,137 @@ __forceinline bool vuUpper(VuRegs r, uint32_t op) {
   return false;
 }
 
+// vuUpper for an instruction whose kind is known when compiling (K: its funct below 0x3C, else
+// 0x80 | fn2; see vuUpperKind), the registers still from `op`. Only that instruction's code is
+// compiled at all, where vuUpper's whole switch is inlined at every call and folded away only
+// later: the recompiled game code has dozens of macro-mode instructions in some functions, and the
+// compiler took minutes over each of those. The same code results.
+constexpr uint32_t vuUpperKind(uint32_t op) {
+  return (op & 63) < 0x3C ? (op & 63) : 0x80 | (((op >> 4) & 0x7C) | (op & 3));
+}
+template <uint32_t K>
+__forceinline void vuUpperK(VuRegs r, uint32_t op) {
+  const uint32_t dest = (op >> 21) & 0xF;
+  const uint32_t ft = (op >> 16) & 31, fs = (op >> 11) & 31, fd = (op >> 6) & 31;
+  u128* vf = r.vf;
+  uint32_t* vi = r.vi;
+  u128& acc = *r.acc;
+  auto on = [&](int i) { return (dest >> (3 - i)) & 1; };
+  const __m128i mask = kDestMask[dest];
+  auto storev = [&](u128& dst, __m128 res, bool flags) {
+    const __m128 v = clampv(res);
+    if (&dst != &vf[0]) {
+      const __m128 old = _mm_loadu_ps(dst.f);
+      _mm_storeu_ps(dst.f, _mm_blendv_ps(old, v, _mm_castsi128_ps(mask)));
+    }
+    if (flags) setFlags(vi, v, _mm_castsi128_ps(mask));
+  };
+  auto store = [&](u128& dst, const float res[4], bool flags) { storev(dst, _mm_loadu_ps(res), flags); };
+  enum class Op { Add, Sub, Mul, Madd, Msub, Max, Min };
+  auto arith = [&](Op o, u128& dst, __m128 y) {
+    const __m128 x = _mm_loadu_ps(vf[fs].f);
+    __m128 res;
+    switch (o) {
+      case Op::Add: res = _mm_add_ps(x, y); break;
+      case Op::Sub: res = _mm_sub_ps(x, y); break;
+      case Op::Mul: res = _mm_mul_ps(x, y); break;
+      case Op::Madd: res = _mm_add_ps(_mm_loadu_ps(acc.f), _mm_mul_ps(x, y)); break;
+      case Op::Msub: res = _mm_sub_ps(_mm_loadu_ps(acc.f), _mm_mul_ps(x, y)); break;
+      case Op::Max: res = _mm_max_ps(y, x); break;
+      default: res = _mm_min_ps(y, x); break;
+    }
+    storev(dst, res, o != Op::Max && o != Op::Min);
+  };
+  auto bcAt = [&] { return _mm_set1_ps(vf[ft].f[op & 3]); };
+  auto qAt = [&] { return _mm_set1_ps(asFloat(vi[kVuQ])); };
+  auto iAt = [&] { return _mm_set1_ps(asFloat(vi[kVuI])); };
+  auto ftAt = [&] { return _mm_loadu_ps(vf[ft].f); };
+  if constexpr (K < 0x80) {  // to fd
+    if constexpr (K <= 0x03) arith(Op::Add, vf[fd], bcAt());
+    else if constexpr (K <= 0x07) arith(Op::Sub, vf[fd], bcAt());
+    else if constexpr (K <= 0x0B) arith(Op::Madd, vf[fd], bcAt());
+    else if constexpr (K <= 0x0F) arith(Op::Msub, vf[fd], bcAt());
+    else if constexpr (K <= 0x13) arith(Op::Max, vf[fd], bcAt());
+    else if constexpr (K <= 0x17) arith(Op::Min, vf[fd], bcAt());
+    else if constexpr (K <= 0x1B) arith(Op::Mul, vf[fd], bcAt());
+    else if constexpr (K == 0x1C) arith(Op::Mul, vf[fd], qAt());
+    else if constexpr (K == 0x1D) arith(Op::Max, vf[fd], iAt());
+    else if constexpr (K == 0x1E) arith(Op::Mul, vf[fd], iAt());
+    else if constexpr (K == 0x1F) arith(Op::Min, vf[fd], iAt());
+    else if constexpr (K == 0x20) arith(Op::Add, vf[fd], qAt());
+    else if constexpr (K == 0x21) arith(Op::Madd, vf[fd], qAt());
+    else if constexpr (K == 0x22) arith(Op::Add, vf[fd], iAt());
+    else if constexpr (K == 0x23) arith(Op::Madd, vf[fd], iAt());
+    else if constexpr (K == 0x24) arith(Op::Sub, vf[fd], qAt());
+    else if constexpr (K == 0x25) arith(Op::Msub, vf[fd], qAt());
+    else if constexpr (K == 0x26) arith(Op::Sub, vf[fd], iAt());
+    else if constexpr (K == 0x27) arith(Op::Msub, vf[fd], iAt());
+    else if constexpr (K == 0x28) arith(Op::Add, vf[fd], ftAt());
+    else if constexpr (K == 0x29) arith(Op::Madd, vf[fd], ftAt());
+    else if constexpr (K == 0x2A) arith(Op::Mul, vf[fd], ftAt());
+    else if constexpr (K == 0x2B) arith(Op::Max, vf[fd], ftAt());
+    else if constexpr (K == 0x2C) arith(Op::Sub, vf[fd], ftAt());
+    else if constexpr (K == 0x2D) arith(Op::Msub, vf[fd], ftAt());
+    else if constexpr (K == 0x2E) {  // OPMSUB
+      const float res[4] = {acc.f[0] - vf[fs].f[1] * vf[ft].f[2], acc.f[1] - vf[fs].f[2] * vf[ft].f[0],
+                            acc.f[2] - vf[fs].f[0] * vf[ft].f[1], 0};
+      store(vf[fd], res, true);
+    } else if constexpr (K == 0x2F) arith(Op::Min, vf[fd], ftAt());
+    else static_assert(K < 0x30, "not an upper instruction");
+  } else {  // to ACC, and the rest
+    constexpr uint32_t G = K & 0x7F;
+    if constexpr (G <= 0x03) arith(Op::Add, acc, bcAt());
+    else if constexpr (G <= 0x07) arith(Op::Sub, acc, bcAt());
+    else if constexpr (G <= 0x0B) arith(Op::Madd, acc, bcAt());
+    else if constexpr (G <= 0x0F) arith(Op::Msub, acc, bcAt());
+    else if constexpr (G <= 0x13) {  // ITOFn
+      static constexpr float kScale[4] = {1.0f, 1.0f / 16, 1.0f / 4096, 1.0f / 32768};
+      const u128 src = vf[fs];
+      for (int i = 0; i < 4; ++i)
+        if (on(i) && ft) vf[ft].f[i] = float(src.sw[i]) * kScale[G & 3];
+    } else if constexpr (G <= 0x17) {  // FTOIn
+      static constexpr float kScale[4] = {1.0f, 16.0f, 4096.0f, 32768.0f};
+      const u128 src = vf[fs];
+      for (int i = 0; i < 4; ++i) {
+        if (!on(i) || !ft) continue;
+        const double v = double(src.f[i]) * kScale[G & 3];
+        vf[ft].sw[i] = v >= 2147483647.0 ? INT32_MAX : v <= -2147483648.0 ? INT32_MIN : int32_t(v);
+      }
+    } else if constexpr (G <= 0x1B) arith(Op::Mul, acc, bcAt());
+    else if constexpr (G == 0x1C) arith(Op::Mul, acc, qAt());
+    else if constexpr (G == 0x1D) {  // ABS
+      const float res[4] = {std::fabs(vf[fs].f[0]), std::fabs(vf[fs].f[1]), std::fabs(vf[fs].f[2]), std::fabs(vf[fs].f[3])};
+      store(vf[ft], res, false);
+    } else if constexpr (G == 0x1E) arith(Op::Mul, acc, iAt());
+    else if constexpr (G == 0x1F) {  // CLIPw.xyz
+      const float w = std::fabs(vf[ft].f[3]);
+      uint32_t b = 0;
+      for (int i = 0; i < 3; ++i) {
+        if (vf[fs].f[i] > w) b |= 1u << (2 * i);
+        if (vf[fs].f[i] < -w) b |= 2u << (2 * i);
+      }
+      vi[kVuClip] = ((vi[kVuClip] << 6) | b) & 0xFFFFFF;
+    } else if constexpr (G == 0x20) arith(Op::Add, acc, qAt());
+    else if constexpr (G == 0x21) arith(Op::Madd, acc, qAt());
+    else if constexpr (G == 0x22) arith(Op::Add, acc, iAt());
+    else if constexpr (G == 0x23) arith(Op::Madd, acc, iAt());
+    else if constexpr (G == 0x24) arith(Op::Sub, acc, qAt());
+    else if constexpr (G == 0x25) arith(Op::Msub, acc, qAt());
+    else if constexpr (G == 0x26) arith(Op::Sub, acc, iAt());
+    else if constexpr (G == 0x27) arith(Op::Msub, acc, iAt());
+    else if constexpr (G == 0x28) arith(Op::Add, acc, ftAt());
+    else if constexpr (G == 0x29) arith(Op::Madd, acc, ftAt());
+    else if constexpr (G == 0x2A) arith(Op::Mul, acc, ftAt());
+    else if constexpr (G == 0x2C) arith(Op::Sub, acc, ftAt());
+    else if constexpr (G == 0x2D) arith(Op::Msub, acc, ftAt());
+    else if constexpr (G == 0x2E) {  // OPMULA
+      const float res[4] = {vf[fs].f[1] * vf[ft].f[2], vf[fs].f[2] * vf[ft].f[0], vf[fs].f[0] * vf[ft].f[1], 0};
+      store(acc, res, true);
+    } else if constexpr (G == 0x2F) {  // NOP
+    } else static_assert(G == 0x2F, "not an upper instruction");
+  }
+}
+
 template <int O, int B, bool ToAcc>
 __forceinline __m128 VuMicro::upperArithStore(VuMicro& m, const Pair& p, __m128& mask) {
   u128* vf = m.r_.vf;

@@ -24,10 +24,10 @@ enum : int { kVuStatus = 16, kVuMac = 17, kVuClip = 18, kVuR = 20, kVuI = 21, kV
 // Lower instructions with the same encoding in macro and micro mode (MOVE ... RXOR, field
 // numbers 0x30-0x43 of the second decode table). `data`/`dataQwords` is the unit's data memory.
 // DIV/SQRT/RSQRT store their result in *q. False if `op` is not one of them.
-bool vuLowerCommon(VuRegs r, uint32_t op, uint8_t* data, uint32_t dataQwords, uint32_t* q);
+CODPORT_API bool vuLowerCommon(VuRegs r, uint32_t op, uint8_t* data, uint32_t dataQwords, uint32_t* q);
 
 // Micro-mode interpreter: runs from a start address until an E-bit (plus its delay slot).
-class VuMicro {
+class CODPORT_API VuMicro {
 public:
   VuMicro(VuRegs regs, uint8_t* code, uint32_t codeBytes, uint8_t* data, uint32_t dataBytes)
       : r_(regs), code_(code), codeBytes_(codeBytes), data_(data), dataBytes_(dataBytes) {}
@@ -157,7 +157,7 @@ struct VuBlockEntry {
   VuMicro::BlockFn fn;
 };
 void registerVuBlocks(std::vector<VuBlockEntry>& out);
-uint64_t vuBlockHash(uint32_t pc, const uint8_t* code, int pairs);
+CODPORT_API uint64_t vuBlockHash(uint32_t pc, const uint8_t* code, int pairs);
 // With CODPORT_VU_COLLECT=FILE, blocks run without compiled code are added to FILE at exit.
 void vuCollectSave();
 // `executable`: the game's, for a blocks file that says where in it each block's words are (an index,

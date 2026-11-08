@@ -16,3 +16,4 @@
 
 # Imagens de disco do jogo
 *.iso
+/build-game/

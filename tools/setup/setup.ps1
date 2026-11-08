@@ -8,6 +8,7 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $ini = Join-Path $root 'codport.ini'
 $exe = Join-Path $root 'build\codport.exe'
 $log = Join-Path $root 'build\setup.log'
+$restLog = Join-Path $root 'build\setup-rest.log'
 $pt = (Get-Culture).TwoLetterISOLanguageName -eq 'pt'
 function T($en, $ptText) { if ($pt) { $ptText } else { $en } }
 
@@ -58,7 +59,8 @@ function Saved-Iso {
   return ''
 }
 
-function Ready { (Test-Path $exe) -and (Test-Path (Join-Path $root 'recomp\gen\table.cpp')) }
+function Ready { (Test-Path $exe) -and (Test-Path (Join-Path $root 'build\codport_game.dll')) }
+function AllReady { (Ready) -and (Test-Path (Join-Path $root 'build\codport_game_cold.dll')) }
 
 # The window.
 $form = New-Object Windows.Forms.Form
@@ -102,16 +104,19 @@ $browse = Add-Button (T 'Browse...' 'Procurar...') 504 145 120
 $isoStatus = Add-Label '' 32 176 592 20
 
 # 3. Build
-Add-Label (T '3. Build the game from it (takes a while; run once)' '3. Gerar o jogo a partir dela (demora um pouco; só uma vez)') 16 210 608 20 $true | Out-Null
+Add-Label (T '3. Build the game from it (about a minute; once)' '3. Gerar o jogo a partir dela (cerca de um minuto; só uma vez)') 16 210 608 20 $true | Out-Null
 $prepare = Add-Button (T 'Build the game' 'Gerar o jogo') 32 236 160
 $play = Add-Button (T 'Play' 'Jogar') 504 236 120
-$progress = Add-Label '' 204 242 290 20
+$progress = Add-Label '' 204 242 296 20
+$bar = New-Object Windows.Forms.ProgressBar
+$bar.SetBounds(16, 274, 608, 16)
+$form.Controls.Add($bar)
 $output = New-Object Windows.Forms.TextBox
 $output.Multiline = $true
 $output.ScrollBars = 'Vertical'
 $output.ReadOnly = $true
 $output.Font = New-Object Drawing.Font('Consolas', 8)
-$output.SetBounds(16, 278, 608, 226)
+$output.SetBounds(16, 298, 608, 206)
 $form.Controls.Add($output)
 
 function Refresh-State {
@@ -130,9 +135,9 @@ function Refresh-State {
   if (-not $iso) { $isoStatus.Text = T 'Choose the image of your disc.' 'Escolha a imagem do seu disco.'; $isoStatus.ForeColor = [Drawing.Color]::Black }
   elseif ($isoOk) { $isoStatus.Text = T 'Castlevania: Curse of Darkness (SLES-53755) found.' 'Castlevania: Curse of Darkness (SLES-53755) encontrado.'; $isoStatus.ForeColor = [Drawing.Color]::DarkGreen }
   else { $isoStatus.Text = T 'This is not the European disc of the game (SLES-53755).' 'Esta não é a imagem do disco europeu do jogo (SLES-53755).'; $isoStatus.ForeColor = [Drawing.Color]::DarkRed }
-  $prepare.Enabled = [bool]($tools -and $isoOk -and -not $script:job)
+  $prepare.Enabled = [bool]($tools -and $isoOk -and -not $script:job -and -not $script:rest)
   $play.Enabled = [bool]((Ready) -and $isoOk -and -not $script:job)
-  if ((Ready) -and -not $script:job -and -not $progress.Text) { $progress.Text = T 'Ready to play.' 'Pronto para jogar.' }
+  if ((AllReady) -and -not $script:job -and -not $script:rest -and -not $progress.Text) { $progress.Text = T 'Ready to play.' 'Pronto para jogar.' }
 }
 
 $installTools.Add_Click({
@@ -157,48 +162,77 @@ $browse.Add_Click({
   }
 })
 
-# The build runs in a console of its own, its output going to a log that a timer shows here.
+# A phase of tools\setup\build-game.bat, hidden, its output going to a log that a timer shows here.
+# "first" builds what the game runs (enough to play); "rest" the other functions, after, at a lower
+# priority, carrying on even if this window is closed.
+function Start-Phase($phase, $logFile) {
+  New-Item -ItemType Directory -Force (Split-Path $logFile) | Out-Null
+  Set-Content $logFile '' -NoNewline
+  $script:shown = 0
+  $script:logNow = $logFile
+  $run = Join-Path $root "build\setup-$phase.bat"
+  $bat = Join-Path $root 'tools\setup\build-game.bat'
+  Set-Content $run "@echo off`r`ncall `"$bat`" $phase > `"$logFile`" 2>&1`r`nexit /b %errorlevel%`r`n" -Encoding Default
+  $p = Start-Process $run -WindowStyle Hidden -PassThru
+  $p.Handle | Out-Null  # held, or its exit code is lost once it ends
+  if ($phase -eq 'rest') { try { $p.PriorityClass = 'BelowNormal' } catch {} }
+  return $p
+}
+
 $script:job = $null
+$script:rest = $null
 $script:shown = 0
+$script:logNow = $log
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
-  if (Test-Path $log) {
-    $text = [IO.File]::ReadAllText($log)
+  if (Test-Path $script:logNow) {
+    $text = [IO.File]::ReadAllText($script:logNow)
     if ($text.Length -gt $script:shown) {
       $output.AppendText($text.Substring($script:shown).Replace("`n", "`r`n").Replace("`r`r", "`r"))
       $script:shown = $text.Length
     }
+    $steps = [regex]::Matches($text, '\[(\d+)/(\d+)\]')
+    if ($steps.Count) {
+      $last = $steps[$steps.Count - 1]
+      $bar.Style = 'Continuous'
+      $bar.Maximum = [int]$last.Groups[2].Value
+      $bar.Value = [Math]::Min([int]$last.Groups[1].Value, $bar.Maximum)
+    } else { $bar.Style = 'Marquee' }
   }
   if ($script:job -and $script:job.HasExited) {
-    $timer.Stop()
     $ok = $script:job.ExitCode -eq 0 -and (Ready)
     $script:job = $null
+    $bar.Style = 'Continuous'
     if ($ok) {
       $shell = New-Object -ComObject WScript.Shell
       $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Castlevania - Curse of Darkness.lnk'))
       $link.TargetPath = $exe
       $link.WorkingDirectory = Split-Path $exe
       $link.Save()
-      $progress.Text = T 'Done. A shortcut is on your desktop.' 'Pronto. Há um atalho na sua área de trabalho.'
+      $progress.Text = T 'Ready to play. Finishing the rest in the background.' 'Pronto para jogar. O resto termina em segundo plano.'
+      $output.AppendText((T "`r`n--- The game can be played now (shortcut on the desktop). The functions it seldom runs are still being optimized, at low priority; until then they run more slowly. This window can be closed.`r`n`r`n" "`r`n--- Já dá para jogar (atalho na área de trabalho). As funções que o jogo raramente usa ainda estão sendo otimizadas, com prioridade baixa; até lá elas rodam mais devagar. Esta janela pode ser fechada.`r`n`r`n"))
+      $script:rest = Start-Phase 'rest' $restLog
     } else {
+      $timer.Stop()
       $progress.Text = T 'It failed: see the messages below.' 'Falhou: veja as mensagens abaixo.'
     }
+    Refresh-State
+  } elseif ($script:rest -and $script:rest.HasExited) {
+    $timer.Stop()
+    $ok = $script:rest.ExitCode -eq 0
+    $script:rest = $null
+    $bar.Value = $bar.Maximum
+    $progress.Text = if ($ok) { T 'All done.' 'Tudo pronto.' } else { T 'The rest failed (the game still runs): see below.' 'O resto falhou (o jogo roda assim mesmo): veja abaixo.' }
     Refresh-State
   }
 })
 
 $prepare.Add_Click({
-  New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
-  Set-Content $log '' -NoNewline
-  $script:shown = 0
   $output.Clear()
-  $progress.Text = T 'Building... (this takes several minutes)' 'Gerando... (leva vários minutos)'
-  # A batch file of its own: no quoting to get wrong in a folder with spaces.
-  $run = Join-Path $root 'build\setup-run.bat'
-  Set-Content $run "@echo off`r`ncd /d `"$root`"`r`ncall recompile.bat > `"$log`" 2>&1`r`nexit /b %errorlevel%`r`n" -Encoding Default
-  $script:job = Start-Process $run -WindowStyle Hidden -PassThru
-  $script:job.Handle | Out-Null  # held, or its exit code is lost once it ends
+  $progress.Text = T 'Building...' 'Gerando...'
+  $bar.Style = 'Marquee'
+  $script:job = Start-Phase 'first' $log
   $timer.Start()
   Refresh-State
 })

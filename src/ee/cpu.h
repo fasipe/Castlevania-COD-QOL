@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "codport_api.h"
 #include "ee/memory.h"
 
 union u128 {
@@ -48,7 +49,7 @@ class Kernel;
 // so every later step of the port (the static recompiler, hardware HLE) can be checked
 // against it. It stops with a precise reason the first time it meets something the port
 // does not handle yet.
-class Cpu {
+class CODPORT_API Cpu {
 public:
   explicit Cpu(Memory& memory) : mem(memory) {}
 
