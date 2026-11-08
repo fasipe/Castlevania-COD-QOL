@@ -162,6 +162,12 @@ void Settings::load(const std::filesystem::path& from) {
       if (key == "minimapa") minimap = value == "1";
       continue;
     }
+    if (section == "mouse") {
+      if (key == "camera_com_mouse") mouseCamera = value == "1";
+      if (key == "sensibilidade") mouseSensitivity = std::clamp(std::atoi(value.c_str()), 1, 10);
+      if (key == "inverter_vertical") invertMouseY = value == "1";
+      continue;
+    }
     for (int c = 0; c < kControls; ++c) {
       if (key != id(c)) continue;
       if (section == "teclado") keys[c] = uint8_t(keyFromName(value));
@@ -190,6 +196,10 @@ void Settings::save() const {
       << "\n# Texturas suavizadas como no PS2; 0 = pixels duros (vale ao abrir o jogo)\nfiltro_textura=" << (textureFilter ? 1 : 0)
       << "\n# Portas e telas de Loading sem esperar o tempo real; a musica e o som da porta somem\ncarregamento_rapido=" << (fastLoading ? 1 : 0)
       << "\n# Mapa no canto da tela (F8 liga e desliga)\nminimapa=" << (minimap ? 1 : 0)
+      << "\n\n[mouse]\n# O mouse gira a camera (o analogico direito); Esc solta o cursor, um clique na janela prende de novo\n"
+         "camera_com_mouse=" << (mouseCamera ? 1 : 0)
+      << "\n# De 1 a 10\nsensibilidade=" << mouseSensitivity
+      << "\n# 1 = empurrar o mouse para a frente olha para baixo\ninverter_vertical=" << (invertMouseY ? 1 : 0)
       << "\n\n[teclado]\n";
   for (int c = 0; c < kControls; ++c) out << id(c) << '=' << keyName(keys[c]) << '\n';
   out << "\n[controle]\n";

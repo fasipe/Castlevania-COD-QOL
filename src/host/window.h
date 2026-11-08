@@ -69,6 +69,8 @@ inline uint16_t fpsGlyph(char c) {
 
 struct PadInput;
 const PadInput& keyboardPad();  // the controller state the window's keyboard layout gives
+// The mouse's motion (raw counts, y down) since the last call, while the window holds the mouse.
+void takeMouseMotion(int& dx, int& dy);
 
 // Writes interleaved 16-bit stereo samples as a WAV file.
 bool writeWav(const char* path, const std::vector<int16_t>& samples, int rate);

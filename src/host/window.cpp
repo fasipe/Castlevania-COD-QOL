@@ -9,6 +9,7 @@
 #include <intrin.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -50,6 +51,37 @@ void toggleFullscreen(HWND hwnd) {
   settings().save();
 }
 PadInput gKeyboard;
+
+// The mouse turns the camera while the window holds it: the cursor hidden and kept inside, its
+// motion read raw (no pointer acceleration) and added up until the frame takes it. A click in the
+// window holds it; Esc, F1 or another window lets it go.
+bool gMouseHeld = false;
+std::atomic<int> gMouseX{0}, gMouseY{0};
+
+void holdMouse(HWND hwnd, bool on) {
+  on = on && settings().mouseCamera && !IsIconic(hwnd);
+  if (on) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    MapWindowPoints(hwnd, nullptr, reinterpret_cast<POINT*>(&rc), 2);
+    ClipCursor(&rc);
+  } else if (gMouseHeld) {
+    ClipCursor(nullptr);
+  }
+  if (on != gMouseHeld) {
+    gMouseHeld = on;
+    gMouseX = 0, gMouseY = 0;
+    // The cursor: hidden over the window while held (and in WM_SETCURSOR), shown again when let go.
+    SetCursor(on ? nullptr : LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW)));
+  }
+}
+
+bool cursorInside(HWND hwnd) {
+  POINT pt;
+  RECT rc;
+  if (!GetCursorPos(&pt) || !ScreenToClient(hwnd, &pt) || !GetClientRect(hwnd, &rc)) return false;
+  return PtInRect(&rc, pt) != 0;
+}
 
 void setKey(int vk, bool down) {
   if (vk < 0 || vk >= 256) return;
@@ -94,6 +126,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       }
       if (wp == VK_F1) {
         if (!(lp & (1 << 30))) {
+          holdMouse(hwnd, false);
           std::fill(std::begin(gHeld), std::end(gHeld), false);
           gKeyboard = {};
           showControlsDialog(hwnd);
@@ -104,13 +137,38 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (!(lp & (1 << 30))) toggleFullscreen(hwnd);
         return 0;
       }
+      if (wp == VK_ESCAPE) holdMouse(hwnd, false);
       setKey(int(wp), true);
       return 0;
     case WM_KEYUP: case WM_SYSKEYUP: setKey(int(wp), false); return 0;
     case WM_KILLFOCUS:
+      holdMouse(hwnd, false);
       std::fill(std::begin(gHeld), std::end(gHeld), false);
       gKeyboard = {};
       return 0;
+    case WM_ACTIVATE:  // back by keyboard (Alt+Tab) with the cursor over the game: held again
+      if (LOWORD(wp) == WA_ACTIVE && cursorInside(hwnd)) holdMouse(hwnd, true);
+      break;
+    case WM_LBUTTONDOWN: holdMouse(hwnd, true); return 0;
+    case WM_SIZE: case WM_MOVE:
+      if (gMouseHeld) holdMouse(hwnd, true);  // the cursor's bounds follow the window
+      break;
+    case WM_SETCURSOR:
+      if (gMouseHeld && LOWORD(lp) == HTCLIENT) {
+        SetCursor(nullptr);
+        return TRUE;
+      }
+      break;
+    case WM_INPUT: {
+      RAWINPUT in;
+      UINT size = sizeof(in);
+      if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &in, &size, sizeof(RAWINPUTHEADER)) != UINT(-1) &&
+          in.header.dwType == RIM_TYPEMOUSE && !(in.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) && gMouseHeld) {
+        gMouseX += in.data.mouse.lLastX;
+        gMouseY += in.data.mouse.lLastY;
+      }
+      break;  // DefWindowProc cleans up
+    }
     case WM_EXITSIZEMOVE:  // resized by hand: that size next time
       if ((GetWindowLongW(hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW) && !IsZoomed(hwnd)) {
         RECT rc;
@@ -129,6 +187,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }  // namespace
 
 const PadInput& keyboardPad() { return gKeyboard; }
+
+void takeMouseMotion(int& dx, int& dy) {
+  dx = gMouseX.exchange(0), dy = gMouseY.exchange(0);
+}
 
 namespace {
 bool gConsole = false;  // output can be read: redirected, or a console attached
@@ -319,6 +381,9 @@ bool Window::create(const wchar_t* title, int width, int height) {
   hwnd_ = hwnd;
   gTitle = title;
   if (!hwnd) return false;
+  const RAWINPUTDEVICE mouse{0x01, 0x02, 0, hwnd};  // generic desktop, mouse
+  RegisterRawInputDevices(&mouse, 1, sizeof(mouse));
+  if (GetForegroundWindow() == hwnd && cursorInside(hwnd)) holdMouse(hwnd, true);
   updateTitle(hwnd);
   if (settings().fullscreen) toggleFullscreen(hwnd);
   return true;

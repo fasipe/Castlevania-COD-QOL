@@ -21,7 +21,8 @@ namespace {
 enum : int { kList = 100, kClear, kDefaults, kClose, kHint, kTabs };
 
 // The options page: a check box per setting, the resolution in a list.
-enum : int { kFullscreen = 200, kWide, kFilter, kFps, kMinimap, kFastLoading, kSprint, kAttackTurn, kScale, kScaleLabel, kOptionsNote, kWindowSize };
+enum : int { kFullscreen = 200, kWide, kFilter, kFps, kMinimap, kFastLoading, kSprint, kAttackTurn, kMouseCamera, kInvertY,
+             kScale, kScaleLabel, kOptionsNote, kWindowSize, kSensitivity };
 bool* optionOf(int id) {
   Settings& s = settings();
   switch (id) {
@@ -31,6 +32,8 @@ bool* optionOf(int id) {
     case kFastLoading: return &s.fastLoading;
     case kSprint: return &s.sprint;
     case kAttackTurn: return &s.attackTurn;
+    case kMouseCamera: return &s.mouseCamera;
+    case kInvertY: return &s.invertMouseY;
   }
   return nullptr;
 }
@@ -187,7 +190,7 @@ void createOptions() {
     HWND c = child(L"BUTTON", b.text, WS_TABSTOP | BS_AUTOCHECKBOX, b.id, 40, y, 600, 24);
     SendMessageW(c, BM_SETCHECK, b.on ? BST_CHECKED : BST_UNCHECKED, 0);
     d.optionsPage.push_back(c);
-    y += 30;
+    y += 26;
   }
   // The window's size: the usual ones that fit on this screen, and the one it has if it is none of them.
   d.optionsPage.push_back(child(L"STATIC", L"Tamanho da janela (em tela cheia, o do monitor):", 0, -1, 40, y + 4, 300, 22));
@@ -207,16 +210,37 @@ void createOptions() {
   for (const wchar_t* option : {L"1x (a do PS2)", L"2x", L"3x", L"4x"}) SendMessageW(scale, CB_ADDSTRING, 0, LPARAM(option));
   SendMessageW(scale, CB_SETCURSEL, WPARAM(std::clamp(s.scale, 1, 4) - 1), 0);
   d.optionsPage.push_back(scale);
-  y += 52;
+  y += 40;
   d.optionsPage.push_back(child(L"STATIC", L"Jogo", 0, -1, 28, y, 600, 20));
   y += 26;
   for (const Box& b : game) {
     HWND c = child(L"BUTTON", b.text, WS_TABSTOP | BS_AUTOCHECKBOX, b.id, 40, y, 600, 24);
     SendMessageW(c, BM_SETCHECK, b.on ? BST_CHECKED : BST_UNCHECKED, 0);
     d.optionsPage.push_back(c);
-    y += 30;
+    y += 26;
   }
-  d.optionsPage.push_back(child(L"STATIC", L"As mudanças são salvas na hora, no codport.ini.", 0, kOptionsNote, 28, 490, 600, 22));
+  y += 14;
+  d.optionsPage.push_back(child(L"STATIC", L"Mouse", 0, -1, 28, y, 600, 20));
+  y += 26;
+  HWND mouse = child(L"BUTTON", L"Câmera com o mouse (Esc solta o cursor, um clique na janela prende de novo)",
+                     WS_TABSTOP | BS_AUTOCHECKBOX, kMouseCamera, 40, y, 600, 24);
+  SendMessageW(mouse, BM_SETCHECK, s.mouseCamera ? BST_CHECKED : BST_UNCHECKED, 0);
+  d.optionsPage.push_back(mouse);
+  y += 30;
+  d.optionsPage.push_back(child(L"STATIC", L"Sensibilidade:", 0, -1, 40, y + 4, 300, 22));
+  HWND sensitivity = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, kSensitivity, 344, y, 220, 300);
+  for (int i = 1; i <= 10; ++i) {
+    const std::wstring text = std::to_wstring(i) + (i == 5 ? L" (padrão)" : L"");
+    SendMessageW(sensitivity, CB_ADDSTRING, 0, LPARAM(text.c_str()));
+  }
+  SendMessageW(sensitivity, CB_SETCURSEL, WPARAM(std::clamp(s.mouseSensitivity, 1, 10) - 1), 0);
+  d.optionsPage.push_back(sensitivity);
+  y += 34;
+  HWND invert = child(L"BUTTON", L"Inverter o vertical (mouse para a frente olha para baixo)", WS_TABSTOP | BS_AUTOCHECKBOX, kInvertY,
+                      40, y, 600, 24);
+  SendMessageW(invert, BM_SETCHECK, s.invertMouseY ? BST_CHECKED : BST_UNCHECKED, 0);
+  d.optionsPage.push_back(invert);
+  d.optionsPage.push_back(child(L"STATIC", L"As mudanças são salvas na hora, no codport.ini.", 0, kOptionsNote, 28, 528, 600, 22));
 }
 
 void showPage(int page) {
@@ -245,7 +269,7 @@ void create(HWND wnd) {
   SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
   d.font = CreateFontIndirectW(&metrics.lfMessageFont);
   // The tabs, behind what each page shows.
-  d.tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 668, 504, wnd, HMENU(INT_PTR(kTabs)),
+  d.tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 668, 548, wnd, HMENU(INT_PTR(kTabs)),
                          GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.tabs, WM_SETFONT, WPARAM(d.font), TRUE);
   for (const wchar_t* name : {L"Controles", L"Opções"}) {
@@ -255,7 +279,7 @@ void create(HWND wnd) {
     SendMessageW(d.tabs, TCM_INSERTITEMW, WPARAM(name[0] == L'C' ? 0 : 1), LPARAM(&tab));
   }
   d.list = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
-                           16, 40, 648, 412, wnd, HMENU(INT_PTR(kList)), GetModuleHandleW(nullptr), nullptr);
+                           16, 40, 648, 456, wnd, HMENU(INT_PTR(kList)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.list, WM_SETFONT, WPARAM(d.font), TRUE);
   SendMessageW(d.list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
   const wchar_t* titles[] = {L"Ação", L"Teclado", L"Controle (Xbox)", L"No PS2"};
@@ -277,11 +301,11 @@ void create(HWND wnd) {
     refreshRow(row);
   }
   d.hint = CreateWindowW(L"STATIC", L"Clique na ação que quer mudar e aperte a tecla ou o botão do controle.",
-                         WS_CHILD | WS_VISIBLE, 16, 462, 648, 40, wnd, HMENU(INT_PTR(kHint)), GetModuleHandleW(nullptr), nullptr);
+                         WS_CHILD | WS_VISIBLE, 16, 506, 648, 40, wnd, HMENU(INT_PTR(kHint)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.hint, WM_SETFONT, WPARAM(d.font), TRUE);
-  d.controlsPage = {d.list, d.hint, button(wnd, kClear, L"Limpar a ação", 12, 518, 120),
-                    button(wnd, kDefaults, L"Restaurar padrão", 138, 518, 140)};
-  button(wnd, kClose, L"Fechar", 578, 518, 90);
+  d.controlsPage = {d.list, d.hint, button(wnd, kClear, L"Limpar a ação", 12, 562, 120),
+                    button(wnd, kDefaults, L"Restaurar padrão", 138, 562, 140)};
+  button(wnd, kClose, L"Fechar", 578, 562, 90);
   createOptions();
   showPage(0);
 }
@@ -295,11 +319,16 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
       return LRESULT(GetSysColorBrush(COLOR_WINDOW));
     case WM_COMMAND:
       if (gDialog->capturing && (LOWORD(wp) == kClear || LOWORD(wp) == kDefaults)) finishCapture(L"");
-      if (LOWORD(wp) >= kFullscreen && LOWORD(wp) <= kAttackTurn && HIWORD(wp) == BN_CLICKED)
+      if (LOWORD(wp) >= kFullscreen && LOWORD(wp) <= kInvertY && HIWORD(wp) == BN_CLICKED)
         return optionClicked(LOWORD(wp), SendMessageW(HWND(lp), BM_GETCHECK, 0, 0) == BST_CHECKED), 0;
       if (LOWORD(wp) == kWindowSize && HIWORD(wp) == CBN_SELCHANGE) {
         const size_t i = size_t(SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0));
         if (i < gDialog->sizes.size()) setWindowSize(gDialog->owner, gDialog->sizes[i].first, gDialog->sizes[i].second);
+        return 0;
+      }
+      if (LOWORD(wp) == kSensitivity && HIWORD(wp) == CBN_SELCHANGE) {
+        settings().mouseSensitivity = int(SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0)) + 1;
+        settings().save();
         return 0;
       }
       if (LOWORD(wp) == kScale && HIWORD(wp) == CBN_SELCHANGE) {
@@ -366,7 +395,7 @@ void showControlsDialog(void* ownerHandle) {
   Dialog dialog;
   gDialog = &dialog;
   dialog.owner = owner;
-  RECT r{0, 0, 680, 560};
+  RECT r{0, 0, 680, 604};
   const DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE;
   AdjustWindowRect(&r, style, FALSE);
   RECT o{};

@@ -21,6 +21,7 @@ This is a personal, non-commercial fan project. It is not affiliated with or end
 - **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off.
 - **Any screen size** - full screen at the monitor's own resolution, or a window sized for 1080p, 1440p, 4K or ultrawide screens, the picture kept in proportion with black bars.
 - **Keyboard and Xbox controller** - XInput controllers work out of the box, and an optional frame counter shows performance (**F9**).
+- **Camera with the mouse** - playing on the keyboard, the mouse turns the camera, with its sensitivity and an inverted vertical axis in **F1**. A click in the window holds the cursor there; **Esc** lets it go.
 
 ## Required Game Version
 
@@ -82,7 +83,7 @@ Both parts are compiled with full optimization, and the same code results as bui
 | Action | Key |
 |---|---|
 | Move | Arrow keys |
-| Camera | I / J / K / L |
+| Camera | Mouse, or I / J / K / L |
 | Attack | A |
 | Jump / Confirm | Z |
 | Final attack / Steal / Examine | X |
@@ -104,6 +105,7 @@ Both parts are compiled with full optimization, and the same code results as bui
 | Key | What it does |
 |---|---|
 | **F1** | Settings and controls |
+| **Esc** | Let the mouse go (a click in the window holds it again) |
 | **Alt+Enter** or **F11** | Full screen |
 | **F10** | 4:3 or 16:9 |
 | **F9** | Frame counter |
@@ -111,7 +113,7 @@ Both parts are compiled with full optimization, and the same code results as bui
 
 ## Settings
 
-Everything in the **F1** window is saved at once in `codport.ini`, next to the `memcard` folder, which is created the first time the game starts and can also be edited by hand. Full screen, widescreen, texture filtering, the frame counter, the minimap and fast loading change at once; the internal resolution, the sprint and the attack turn apply the next time the game starts.
+Everything in the **F1** window is saved at once in `codport.ini`, next to the `memcard` folder, which is created the first time the game starts and can also be edited by hand. Full screen, widescreen, texture filtering, the frame counter, the minimap, fast loading and the mouse change at once; the internal resolution, the sprint and the attack turn apply the next time the game starts.
 
 Saves go to the `memcard` folder. Each session is also recorded in `build/recordings` (inputs, clock and a copy of the memory card) and plays back exactly with `codport --replay <file>`; this is meant for testing, and the folder can be deleted.
 
@@ -173,6 +175,7 @@ Este é um projeto de fã, pessoal e sem fins comerciais. Não tem relação nem
 - **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada.
 - **Qualquer tamanho de tela** - tela cheia na resolução do próprio monitor, ou janela em tamanhos para telas 1080p, 1440p, 4K ou ultrawide, com a imagem mantida na proporção por barras pretas.
 - **Teclado e controle Xbox** - controles XInput funcionam direto, e um contador de quadros opcional mostra o desempenho (**F9**).
+- **Câmera com o mouse** - jogando no teclado, o mouse gira a câmera, com sensibilidade e vertical invertido no **F1**. Um clique na janela prende o cursor nela; o **Esc** solta.
 
 ## Versão Necessária do Jogo
 
@@ -234,7 +237,7 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 | Ação | Tecla |
 |---|---|
 | Andar | Setas |
-| Câmera | I / J / K / L |
+| Câmera | Mouse, ou I / J / K / L |
 | Atacar | A |
 | Pular / Confirmar | Z |
 | Golpe final / Roubar / Examinar | X |
@@ -256,6 +259,7 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 | Tecla | O que faz |
 |---|---|
 | **F1** | Configurações e controles |
+| **Esc** | Solta o mouse (um clique na janela prende de novo) |
 | **Alt+Enter** ou **F11** | Tela cheia |
 | **F10** | 4:3 ou 16:9 |
 | **F9** | Contador de quadros |
@@ -263,7 +267,7 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 
 ## Configurações
 
-Tudo na janela do **F1** é salvo na hora em `codport.ini`, ao lado da pasta `memcard`; o arquivo é criado na primeira vez que o jogo abre e também pode ser editado à mão. Tela cheia, widescreen, filtro de textura, contador de quadros, minimapa e carregamento rápido mudam na hora; a resolução interna, o sprint e os ataques no alvo valem na próxima vez que o jogo abrir.
+Tudo na janela do **F1** é salvo na hora em `codport.ini`, ao lado da pasta `memcard`; o arquivo é criado na primeira vez que o jogo abre e também pode ser editado à mão. Tela cheia, widescreen, filtro de textura, contador de quadros, minimapa, carregamento rápido e mouse mudam na hora; a resolução interna, o sprint e os ataques no alvo valem na próxima vez que o jogo abrir.
 
 Os saves ficam na pasta `memcard`. Cada sessão também é gravada em `build/recordings` (entradas, relógio e uma cópia do cartão de memória) e reproduz exatamente com `codport --replay <arquivo>`; isso serve para testes, e a pasta pode ser apagada.
 

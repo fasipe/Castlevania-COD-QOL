@@ -36,6 +36,9 @@ struct Settings {
   bool fastLoading = true;  // between places, no waiting for real time (nor its sound)
   bool sprint = true;  // L3 sprints (read at start)
   bool attackTurn = true;  // with an enemy locked on, attacks turn to it (read at start)
+  bool mouseCamera = true;  // the mouse turns the camera (the right stick) while the window holds it
+  int mouseSensitivity = 5;  // 1-10
+  bool invertMouseY = false;  // pushing the mouse forward looks down instead of up
 
   static Settings defaults();
   void load(const std::filesystem::path& file);
