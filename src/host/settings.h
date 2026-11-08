@@ -39,6 +39,7 @@ struct Settings {
   bool mouseCamera = true;  // the mouse turns the camera (the right stick) while the window holds it
   int mouseSensitivity = 5;  // 1-10
   bool invertMouseY = false;  // pushing the mouse forward looks down instead of up
+  std::string language;  // of the options window (F1) and the window's title: "pt" or "en"
 
   static Settings defaults();
   void load(const std::filesystem::path& file);
@@ -48,6 +49,9 @@ struct Settings {
 
 Settings& settings();  // the ones in use
 
+bool english();  // the options window and the title in English
+std::string keyLabel(int vk);          // a key as shown in the options window
+std::string padLabel(uint16_t input);  // a controller input as shown there
 std::string keyName(int vk);           // as written in the file and shown ("Z", "Enter", "F1")
 int keyFromName(const std::string& name);
 std::string padName(uint16_t input);   // "A", "LB", "LT"...

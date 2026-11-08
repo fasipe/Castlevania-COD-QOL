@@ -10,38 +10,41 @@
 #include <cstdio>
 #include <fstream>
 #include <format>
+#include <span>
 
 namespace {
 struct Control {
   const char* id;
   const char* label;  // what it does in the game: the manual's "Controls" page, with the default setup
   const char* ps2;    // the button, as the game's own texts call it
+  const char* labelEn;
+  const char* ps2En;
 };
 constexpr Control kControlNames[Settings::kControls] = {
-    {"select", "Abrir o mapa", "Select"},
-    {"l3", "Correr", "L3"},
-    {"r3", "Sem função no jogo", "R3"},
-    {"start", "Abrir o menu", "Start"},
-    {"cima", "IA do Innocent Devil: cima", "Direcional"},
-    {"direita", "IA do Innocent Devil: direita", "Direcional"},
-    {"baixo", "IA do Innocent Devil: baixo", "Direcional"},
-    {"esquerda", "IA do Innocent Devil: esquerda", "Direcional"},
-    {"l2", "Trocar de alvo", "L2"},
-    {"r2", "Travar no alvo", "R2"},
-    {"l1", "Centralizar a câmera", "L1"},
-    {"r1", "Defender", "R1"},
-    {"triangulo", "Habilidade do Innocent Devil / Voltar", "Triângulo"},
-    {"bola", "Golpe final / Roubar / Examinar / Mudar de área", "Bola"},
-    {"x", "Pular / Confirmar", "X (cruz)"},
-    {"quadrado", "Atacar", "Quadrado"},
-    {"analogico_esq_cima", "Andar: para cima", "Analógico esq."},
-    {"analogico_esq_baixo", "Andar: para baixo", "Analógico esq."},
-    {"analogico_esq_esquerda", "Andar: para a esquerda", "Analógico esq."},
-    {"analogico_esq_direita", "Andar: para a direita", "Analógico esq."},
-    {"analogico_dir_cima", "Câmera: para cima", "Analógico dir."},
-    {"analogico_dir_baixo", "Câmera: para baixo", "Analógico dir."},
-    {"analogico_dir_esquerda", "Câmera: para a esquerda", "Analógico dir."},
-    {"analogico_dir_direita", "Câmera: para a direita", "Analógico dir."},
+    {"select", "Abrir o mapa", "Select", "Open the map", "Select"},
+    {"l3", "Correr", "L3", "Sprint", "L3"},
+    {"r3", "Sem função no jogo", "R3", "Not used by the game", "R3"},
+    {"start", "Abrir o menu", "Start", "Open the menu", "Start"},
+    {"cima", "IA do Innocent Devil: cima", "Direcional", "Innocent Devil AI: up", "D-pad"},
+    {"direita", "IA do Innocent Devil: direita", "Direcional", "Innocent Devil AI: right", "D-pad"},
+    {"baixo", "IA do Innocent Devil: baixo", "Direcional", "Innocent Devil AI: down", "D-pad"},
+    {"esquerda", "IA do Innocent Devil: esquerda", "Direcional", "Innocent Devil AI: left", "D-pad"},
+    {"l2", "Trocar de alvo", "L2", "Change target", "L2"},
+    {"r2", "Travar no alvo", "R2", "Lock on", "R2"},
+    {"l1", "Centralizar a câmera", "L1", "Reset the camera", "L1"},
+    {"r1", "Defender", "R1", "Guard", "R1"},
+    {"triangulo", "Habilidade do Innocent Devil / Voltar", "Triângulo", "Innocent Devil ability / Back", "Triangle"},
+    {"bola", "Golpe final / Roubar / Examinar / Mudar de área", "Bola", "Final attack / Steal / Examine / Change area", "Circle"},
+    {"x", "Pular / Confirmar", "X (cruz)", "Jump / Confirm", "Cross"},
+    {"quadrado", "Atacar", "Quadrado", "Attack", "Square"},
+    {"analogico_esq_cima", "Andar: para cima", "Analógico esq.", "Move: up", "Left stick"},
+    {"analogico_esq_baixo", "Andar: para baixo", "Analógico esq.", "Move: down", "Left stick"},
+    {"analogico_esq_esquerda", "Andar: para a esquerda", "Analógico esq.", "Move: left", "Left stick"},
+    {"analogico_esq_direita", "Andar: para a direita", "Analógico esq.", "Move: right", "Left stick"},
+    {"analogico_dir_cima", "Câmera: para cima", "Analógico dir.", "Camera: up", "Right stick"},
+    {"analogico_dir_baixo", "Câmera: para baixo", "Analógico dir.", "Camera: down", "Right stick"},
+    {"analogico_dir_esquerda", "Câmera: para a esquerda", "Analógico dir.", "Camera: left", "Right stick"},
+    {"analogico_dir_direita", "Câmera: para a direita", "Analógico dir.", "Camera: right", "Right stick"},
 };
 
 struct Named {
@@ -78,8 +81,35 @@ std::string trim(std::string s) {
 }  // namespace
 
 const char* Settings::id(int control) { return kControlNames[control].id; }
-const char* Settings::label(int control) { return kControlNames[control].label; }
-const char* Settings::ps2Name(int control) { return kControlNames[control].ps2; }
+const char* Settings::label(int control) { return english() ? kControlNames[control].labelEn : kControlNames[control].label; }
+const char* Settings::ps2Name(int control) { return english() ? kControlNames[control].ps2En : kControlNames[control].ps2; }
+
+bool english() { return settings().language == "en"; }
+
+std::string keyLabel(int vk) {
+  // As shown: the file's names, in the window's language.
+  static constexpr std::pair<int, const char*> kPt[] = {
+      {VK_SPACE, "Espaço"}, {VK_LSHIFT, "Shift esq."}, {VK_RSHIFT, "Shift dir."}, {VK_LCONTROL, "Ctrl esq."}, {VK_RCONTROL, "Ctrl dir."},
+      {VK_LBUTTON, "Clique esq."}, {VK_RBUTTON, "Clique dir."}, {VK_MBUTTON, "Clique do meio"}};
+  static constexpr std::pair<int, const char*> kEn[] = {
+      {VK_SPACE, "Space"}, {VK_LEFT, "Left"}, {VK_UP, "Up"}, {VK_RIGHT, "Right"}, {VK_DOWN, "Down"},
+      {VK_LSHIFT, "Left Shift"}, {VK_RSHIFT, "Right Shift"}, {VK_LCONTROL, "Left Ctrl"}, {VK_RCONTROL, "Right Ctrl"},
+      {VK_LBUTTON, "Left click"}, {VK_RBUTTON, "Right click"}, {VK_MBUTTON, "Middle click"}};
+  for (const auto& [code, name] : english() ? std::span<const std::pair<int, const char*>>(kEn) : std::span<const std::pair<int, const char*>>(kPt))
+    if (code == vk) return name;
+  const std::string name = keyName(vk);
+  return english() && name.rfind("Tecla", 0) == 0 ? "Key" + name.substr(5) : name;
+}
+
+std::string padLabel(uint16_t input) {
+  if (english()) {
+    if (input == XINPUT_GAMEPAD_DPAD_UP) return "Up";
+    if (input == XINPUT_GAMEPAD_DPAD_DOWN) return "Down";
+    if (input == XINPUT_GAMEPAD_DPAD_LEFT) return "Left";
+    if (input == XINPUT_GAMEPAD_DPAD_RIGHT) return "Right";
+  }
+  return padName(input);
+}
 
 std::string keyName(int vk) {
   if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) return std::string(1, char(vk));
@@ -112,6 +142,7 @@ uint16_t padFromName(const std::string& name) {
 
 Settings Settings::defaults() {
   Settings s;
+  s.language = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_PORTUGUESE ? "pt" : "en";
   // Keyboard and mouse, for a hand on W/A/S/D and the other on the mouse: W/A/S/D = left stick
   // (Hector moves with it), the mouse turns the camera (and I/J/K/L = right stick), left and right
   // buttons = square and circle (the attack and the final attack), Space = cross, E = triangle,
@@ -155,6 +186,7 @@ void Settings::load(const std::filesystem::path& from) {
       if (key == "proporcao") wide = value == "16:9";
       if (key == "resolucao") scale = std::clamp(std::atoi(value.c_str()), 1, 4);
       if (key == "mostrar_fps") showFps = value == "1";
+      if (key == "idioma" && (value == "pt" || value == "en")) language = value;
       continue;
     }
     if (section == "jogo") {
@@ -194,6 +226,7 @@ void Settings::save() const {
       << "\n# Resolucao do desenho: 1 = a do PS2; 2, 3 ou 4 = tantas vezes mais nitida (pesa mais na placa de\n"
          "# video; vale ao abrir o jogo)\nresolucao="
       << scale << "\n# Quadros por segundo no canto superior direito (F9 liga e desliga)\nmostrar_fps=" << (showFps ? 1 : 0)
+      << "\n# Idioma das opcoes e controles (F1): pt ou en / Language of the options and controls (F1): pt or en\nidioma=" << language
       << "\n\n[jogo]\n# Com um inimigo travado, os ataques viram para ele (vale ao abrir o jogo)\nataque_no_alvo=" << (attackTurn ? 1 : 0)
       << "\n# L3 (apertar o analogico esquerdo) liga e desliga a corrida mais rapida (vale ao abrir o jogo)\ncorrida=" << (sprint ? 1 : 0)
       << "\n# Texturas suavizadas como no PS2; 0 = pixels duros (vale ao abrir o jogo)\nfiltro_textura=" << (textureFilter ? 1 : 0)

@@ -22,7 +22,7 @@ enum : int { kList = 100, kClear, kDefaults, kClose, kHint, kTabs };
 
 // The options page: a check box per setting, the resolution in a list.
 enum : int { kFullscreen = 200, kWide, kFilter, kFps, kMinimap, kFastLoading, kSprint, kAttackTurn, kMouseCamera, kInvertY,
-             kScale, kScaleLabel, kOptionsNote, kWindowSize, kSensitivity };
+             kScale, kScaleLabel, kOptionsNote, kWindowSize, kSensitivity, kLanguage };
 bool* optionOf(int id) {
   Settings& s = settings();
   switch (id) {
@@ -57,8 +57,10 @@ struct Dialog {
   bool ignoreClick = false;  // the click that chose a mouse button is not a click on the list
   uint16_t padAtStart = 0;
   bool done = false;
+  bool reopen = false;  // the language changed: the window opens again in it, on the options page
 };
 Dialog* gDialog = nullptr;
+int gStartPage = 0;  // the page the window opens on
 
 std::wstring widen(const std::string& s) {
   if (s.empty()) return {};
@@ -66,6 +68,9 @@ std::wstring widen(const std::string& s) {
   MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), int(w.size()));
   return w;
 }
+
+// The window in Portuguese or English (settings: idioma, the list on the options page).
+const wchar_t* T(const wchar_t* pt, const wchar_t* en) { return english() ? en : pt; }
 
 void setHint(const wchar_t* text) { SetWindowTextW(gDialog->hint, text); }
 
@@ -79,8 +84,8 @@ void setCell(int row, int column, const std::wstring& text) {
 void refreshRow(int row) {
   const Settings& s = settings();
   const int c = kRows[row];
-  setCell(row, 1, s.keys[c] ? widen(keyName(s.keys[c])) : L"—");
-  setCell(row, 2, c < Settings::kButtons ? (s.pad[c] ? widen(padName(s.pad[c])) : L"—") : L"(analógico)");
+  setCell(row, 1, s.keys[c] ? widen(keyLabel(s.keys[c])) : L"—");
+  setCell(row, 2, c < Settings::kButtons ? (s.pad[c] ? widen(padLabel(s.pad[c])) : L"—") : T(L"(analógico)", L"(stick)"));
   setCell(row, 3, widen(Settings::ps2Name(c)));
 }
 
@@ -105,8 +110,13 @@ void startCapture() {
   for (int vk = 0; vk < 256; ++vk) d.keysAtStart[vk] = GetAsyncKeyState(vk) & 0x8000;
   d.padAtStart = padHeld();
   const std::wstring name = widen(Settings::label(c));
-  setHint((c < Settings::kButtons ? L"Aperte a tecla, o botão do controle ou clique aqui na lista com o botão do mouse para \"" + name + L"\" (Esc cancela)."
-                                  : L"Aperte a tecla para \"" + name + L"\"; no controle é sempre o analógico (Esc cancela).").c_str());
+  setHint((c < Settings::kButtons
+               ? std::wstring(T(L"Aperte a tecla, o botão do controle ou clique aqui na lista com o botão do mouse para \"",
+                                L"Press the key or the controller button, or click here in the list with a mouse button, for \"")) +
+                     name + T(L"\" (Esc cancela).", L"\" (Esc cancels).")
+               : std::wstring(T(L"Aperte a tecla para \"", L"Press the key for \"")) + name +
+                     T(L"\"; no controle é sempre o analógico (Esc cancela).", L"\"; on the controller it is always the stick (Esc cancels)."))
+              .c_str());
   SetTimer(d.wnd, 1, 15, nullptr);
 }
 
@@ -125,9 +135,11 @@ void finishAssigned(bool isKey) {
   for (int other = 0; other < Settings::kControls; ++other) {
     if (other == c) continue;
     const bool same = isKey ? s.keys[other] == s.keys[c] : other < Settings::kButtons && s.pad[other] == s.pad[c];
-    if (same) return finishCapture(L"Pronto. Atenção: \"" + widen(Settings::label(other)) + L"\" usa o mesmo; apertar faz as duas coisas.");
+    if (same)
+      return finishCapture(std::wstring(T(L"Pronto. Atenção: \"", L"Done. Note: \"")) + widen(Settings::label(other)) +
+                           T(L"\" usa o mesmo; apertar faz as duas coisas.", L"\" uses the same; pressing it does both."));
   }
-  finishCapture(L"Pronto.");
+  finishCapture(T(L"Pronto.", L"Done."));
 }
 
 // Polled while waiting for a key or button: the first one pressed after the wait began.
@@ -150,10 +162,10 @@ void pollCapture() {
     const bool held = GetAsyncKeyState(vk) & 0x8000;
     if (!held) d.keysAtStart[vk] = false;
     if (!held || d.keysAtStart[vk]) continue;
-    if (vk == VK_ESCAPE) return finishCapture(L"Cancelado.");
+    if (vk == VK_ESCAPE) return finishCapture(T(L"Cancelado.", L"Cancelled."));
     // The generic Shift/Ctrl/Alt codes are what the game window receives.
     if (vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_LMENU || vk == VK_RMENU) continue;
-    if (vk == VK_F1 || vk == VK_F10 || vk == VK_F11) return finishCapture(L"F1, F10 e F11 são do port; escolha outra tecla.");
+    if (vk == VK_F1 || vk == VK_F10 || vk == VK_F11) return finishCapture(T(L"F1, F10 e F11 são do port; escolha outra tecla.", L"F1, F10 and F11 belong to the port; choose another key."));
     s.keys[d.control] = uint8_t(vk);
     return finishAssigned(true);
   }
@@ -188,16 +200,21 @@ void createOptions() {
     const wchar_t* text;
     bool on;
   };
-  const Box image[] = {{kFullscreen, L"Tela cheia (também Alt+Enter ou F11)", s.fullscreen},
-                       {kWide, L"Imagem 16:9; desligada, 4:3 como no PS2 (também F10)", s.wide},
-                       {kFilter, L"Texturas suavizadas, como o PS2 desenha", s.textureFilter},
-                       {kFps, L"Quadros por segundo no canto (também F9)", s.showFps}};
-  const Box game[] = {{kMinimap, L"Minimapa no canto da tela (também F8)", s.minimap},
-                      {kFastLoading, L"Carregamento rápido nas portas (a música para durante ele)", s.fastLoading},
-                      {kSprint, L"Correr mais rápido com L3 (vale ao abrir o jogo)", s.sprint},
-                      {kAttackTurn, L"Ataques viram para o inimigo travado (vale ao abrir o jogo)", s.attackTurn}};
+  const Box image[] = {{kFullscreen, T(L"Tela cheia (também Alt+Enter ou F11)", L"Full screen (also Alt+Enter or F11)"), s.fullscreen},
+                       {kWide, T(L"Imagem 16:9; desligada, 4:3 como no PS2 (também F10)", L"16:9 picture; off, 4:3 as on the PS2 (also F10)"), s.wide},
+                       {kFilter, T(L"Texturas suavizadas, como o PS2 desenha", L"Smoothed textures, as the PS2 draws them"), s.textureFilter},
+                       {kFps, T(L"Quadros por segundo no canto (também F9)", L"Frames per second in the corner (also F9)"), s.showFps}};
+  const Box game[] = {{kMinimap, T(L"Minimapa no canto da tela (também F8)", L"Minimap in the corner of the screen (also F8)"), s.minimap},
+                      {kFastLoading, T(L"Carregamento rápido nas portas (a música para durante ele)", L"Fast loading at doors (the music stops during it)"), s.fastLoading},
+                      {kSprint, T(L"Correr mais rápido com L3 (vale ao abrir o jogo)", L"Run faster with L3 (applies when the game starts)"), s.sprint},
+                      {kAttackTurn, T(L"Ataques viram para o inimigo travado (vale ao abrir o jogo)", L"Attacks turn to the locked-on enemy (applies when the game starts)"), s.attackTurn}};
   int y = 52;
-  d.optionsPage.push_back(child(L"STATIC", L"Imagem", 0, -1, 28, y, 600, 20));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Imagem", L"Picture"), 0, -1, 28, y, 300, 20));
+  d.optionsPage.push_back(child(L"STATIC", L"Idioma / Language:", 0, -1, 344, y, 120, 22));
+  HWND language = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST, kLanguage, 468, y - 4, 160, 100);
+  for (const wchar_t* option : {L"Português", L"English"}) SendMessageW(language, CB_ADDSTRING, 0, LPARAM(option));
+  SendMessageW(language, CB_SETCURSEL, english() ? 1 : 0, 0);
+  d.optionsPage.push_back(language);
   y += 26;
   for (const Box& b : image) {
     HWND c = child(L"BUTTON", b.text, WS_TABSTOP | BS_AUTOCHECKBOX, b.id, 40, y, 600, 24);
@@ -206,7 +223,7 @@ void createOptions() {
     y += 26;
   }
   // The window's size: the usual ones that fit on this screen, and the one it has if it is none of them.
-  d.optionsPage.push_back(child(L"STATIC", L"Tamanho da janela (em tela cheia, o do monitor):", 0, -1, 40, y + 4, 300, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Tamanho da janela (em tela cheia, o do monitor):", L"Window size (in full screen, the monitor's):"), 0, -1, 40, y + 4, 300, 22));
   HWND sizeList = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, kWindowSize, 344, y, 220, 300);
   d.sizes = windowSizes(d.owner);
   const std::pair<int, int> current{s.windowWidth, s.windowHeight};
@@ -218,13 +235,13 @@ void createOptions() {
   SendMessageW(sizeList, CB_SETCURSEL, WPARAM(std::find(d.sizes.begin(), d.sizes.end(), current) - d.sizes.begin()), 0);
   d.optionsPage.push_back(sizeList);
   y += 34;
-  d.optionsPage.push_back(child(L"STATIC", L"Resolução do desenho (vale ao abrir o jogo):", 0, kScaleLabel, 40, y + 4, 300, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Resolução do desenho (vale ao abrir o jogo):", L"Drawing resolution (applies when the game starts):"), 0, kScaleLabel, 40, y + 4, 300, 22));
   HWND scale = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, kScale, 344, y, 220, 200);
-  for (const wchar_t* option : {L"1x (a do PS2)", L"2x", L"3x", L"4x"}) SendMessageW(scale, CB_ADDSTRING, 0, LPARAM(option));
+  for (const wchar_t* option : {T(L"1x (a do PS2)", L"1x (the PS2's)"), L"2x", L"3x", L"4x"}) SendMessageW(scale, CB_ADDSTRING, 0, LPARAM(option));
   SendMessageW(scale, CB_SETCURSEL, WPARAM(std::clamp(s.scale, 1, 4) - 1), 0);
   d.optionsPage.push_back(scale);
   y += 40;
-  d.optionsPage.push_back(child(L"STATIC", L"Jogo", 0, -1, 28, y, 600, 20));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Jogo", L"Game"), 0, -1, 28, y, 600, 20));
   y += 26;
   for (const Box& b : game) {
     HWND c = child(L"BUTTON", b.text, WS_TABSTOP | BS_AUTOCHECKBOX, b.id, 40, y, 600, 24);
@@ -235,25 +252,25 @@ void createOptions() {
   y += 14;
   d.optionsPage.push_back(child(L"STATIC", L"Mouse", 0, -1, 28, y, 600, 20));
   y += 26;
-  HWND mouse = child(L"BUTTON", L"Câmera com o mouse (Esc solta o cursor, um clique na janela prende de novo)",
+  HWND mouse = child(L"BUTTON", T(L"Câmera com o mouse (Esc solta o cursor, um clique na janela prende de novo)", L"Camera with the mouse (Esc lets the cursor go, a click in the window holds it again)"),
                      WS_TABSTOP | BS_AUTOCHECKBOX, kMouseCamera, 40, y, 600, 24);
   SendMessageW(mouse, BM_SETCHECK, s.mouseCamera ? BST_CHECKED : BST_UNCHECKED, 0);
   d.optionsPage.push_back(mouse);
   y += 30;
-  d.optionsPage.push_back(child(L"STATIC", L"Sensibilidade:", 0, -1, 40, y + 4, 300, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Sensibilidade:", L"Sensitivity:"), 0, -1, 40, y + 4, 300, 22));
   HWND sensitivity = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, kSensitivity, 344, y, 220, 300);
   for (int i = 1; i <= 10; ++i) {
-    const std::wstring text = std::to_wstring(i) + (i == 5 ? L" (padrão)" : L"");
+    const std::wstring text = std::to_wstring(i) + (i == 5 ? T(L" (padrão)", L" (default)") : L"");
     SendMessageW(sensitivity, CB_ADDSTRING, 0, LPARAM(text.c_str()));
   }
   SendMessageW(sensitivity, CB_SETCURSEL, WPARAM(std::clamp(s.mouseSensitivity, 1, 10) - 1), 0);
   d.optionsPage.push_back(sensitivity);
   y += 34;
-  HWND invert = child(L"BUTTON", L"Inverter o vertical (mouse para a frente olha para baixo)", WS_TABSTOP | BS_AUTOCHECKBOX, kInvertY,
+  HWND invert = child(L"BUTTON", T(L"Inverter o vertical (mouse para a frente olha para baixo)", L"Invert vertical (mouse forward looks down)"), WS_TABSTOP | BS_AUTOCHECKBOX, kInvertY,
                       40, y, 600, 24);
   SendMessageW(invert, BM_SETCHECK, s.invertMouseY ? BST_CHECKED : BST_UNCHECKED, 0);
   d.optionsPage.push_back(invert);
-  d.optionsPage.push_back(child(L"STATIC", L"As mudanças são salvas na hora, no codport.ini.", 0, kOptionsNote, 28, 528, 600, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"As mudanças são salvas na hora, no codport.ini.", L"Changes are saved at once, in codport.ini."), 0, kOptionsNote, 28, 528, 600, 22));
 }
 
 void showPage(int page) {
@@ -285,17 +302,19 @@ void create(HWND wnd) {
   d.tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 6, 6, 668, 548, wnd, HMENU(INT_PTR(kTabs)),
                          GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.tabs, WM_SETFONT, WPARAM(d.font), TRUE);
-  for (const wchar_t* name : {L"Controles", L"Opções"}) {
+  const wchar_t* tabNames[] = {T(L"Controles", L"Controls"), T(L"Opções", L"Options")};
+  for (int i = 0; i < 2; ++i) {
     TCITEMW tab{};
     tab.mask = TCIF_TEXT;
-    tab.pszText = const_cast<wchar_t*>(name);
-    SendMessageW(d.tabs, TCM_INSERTITEMW, WPARAM(name[0] == L'C' ? 0 : 1), LPARAM(&tab));
+    tab.pszText = const_cast<wchar_t*>(tabNames[i]);
+    SendMessageW(d.tabs, TCM_INSERTITEMW, WPARAM(i), LPARAM(&tab));
   }
   d.list = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
                            16, 40, 648, 456, wnd, HMENU(INT_PTR(kList)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.list, WM_SETFONT, WPARAM(d.font), TRUE);
   SendMessageW(d.list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-  const wchar_t* titles[] = {L"Ação", L"Teclado", L"Controle (Xbox)", L"No PS2"};
+  const wchar_t* titles[] = {T(L"Ação", L"Action"), T(L"Teclado", L"Keyboard"), T(L"Controle (Xbox)", L"Controller (Xbox)"),
+                             T(L"No PS2", L"On the PS2")};
   const int widths[] = {296, 100, 110, 116};
   for (int i = 0; i < 4; ++i) {
     LVCOLUMNW col{};
@@ -313,14 +332,15 @@ void create(HWND wnd) {
     SendMessageW(d.list, LVM_INSERTITEMW, 0, LPARAM(&item));
     refreshRow(row);
   }
-  d.hint = CreateWindowW(L"STATIC", L"Clique na ação que quer mudar e aperte a tecla ou o botão do controle.",
+  d.hint = CreateWindowW(L"STATIC", T(L"Clique na ação que quer mudar e aperte a tecla ou o botão do controle.", L"Click the action to change and press the key or the controller button."),
                          WS_CHILD | WS_VISIBLE, 16, 506, 648, 40, wnd, HMENU(INT_PTR(kHint)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(d.hint, WM_SETFONT, WPARAM(d.font), TRUE);
-  d.controlsPage = {d.list, d.hint, button(wnd, kClear, L"Limpar a ação", 12, 562, 120),
-                    button(wnd, kDefaults, L"Restaurar padrão", 138, 562, 140)};
-  button(wnd, kClose, L"Fechar", 578, 562, 90);
+  d.controlsPage = {d.list, d.hint, button(wnd, kClear, T(L"Limpar a ação", L"Clear action"), 12, 562, 120),
+                    button(wnd, kDefaults, T(L"Restaurar padrão", L"Restore defaults"), 138, 562, 140)};
+  button(wnd, kClose, T(L"Fechar", L"Close"), 578, 562, 90);
   createOptions();
-  showPage(0);
+  SendMessageW(d.tabs, TCM_SETCURSEL, WPARAM(gStartPage), 0);
+  showPage(gStartPage);
 }
 
 LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -337,6 +357,14 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
       if (LOWORD(wp) == kWindowSize && HIWORD(wp) == CBN_SELCHANGE) {
         const size_t i = size_t(SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0));
         if (i < gDialog->sizes.size()) setWindowSize(gDialog->owner, gDialog->sizes[i].first, gDialog->sizes[i].second);
+        return 0;
+      }
+      if (LOWORD(wp) == kLanguage && HIWORD(wp) == CBN_SELCHANGE) {
+        settings().language = SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0) == 1 ? "en" : "pt";
+        settings().save();
+        settingsChanged();
+        gDialog->reopen = true;
+        DestroyWindow(wnd);
         return 0;
       }
       if (LOWORD(wp) == kSensitivity && HIWORD(wp) == CBN_SELCHANGE) {
@@ -357,7 +385,7 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (c < Settings::kButtons) settings().pad[c] = 0;
             settings().save();
             refreshRow(row);
-            setHint(L"Sem tecla nem botão.");
+            setHint(T(L"Sem tecla nem botão.", L"No key or button."));
           }
           break;
         case kDefaults: {
@@ -365,7 +393,7 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
           settings().keys = def.keys, settings().pad = def.pad;
           settings().save();
           for (int row = 0; row < Settings::kControls; ++row) refreshRow(row);
-          setHint(L"Teclas e botões voltaram ao padrão.");
+          setHint(T(L"Teclas e botões voltaram ao padrão.", L"Keys and buttons are back to the defaults."));
           break;
         }
         case kClose: DestroyWindow(wnd); break;
@@ -417,7 +445,7 @@ void showControlsDialog(void* ownerHandle) {
   RECT o{};
   GetWindowRect(owner, &o);
   const int w = r.right - r.left, h = r.bottom - r.top;
-  HWND wnd = CreateWindowW(L"codport-controls", L"Opções e controles", style, (o.left + o.right - w) / 2,
+  HWND wnd = CreateWindowW(L"codport-controls", T(L"Opções e controles", L"Options and controls"), style, (o.left + o.right - w) / 2,
                            (o.top + o.bottom - h) / 2, w, h, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
   if (!wnd) {
     gDialog = nullptr;
@@ -437,7 +465,13 @@ void showControlsDialog(void* ownerHandle) {
       DispatchMessageW(&msg);
     }
   }
+  gDialog = nullptr;
+  if (dialog.reopen) {  // in the language just chosen, on the options page
+    gStartPage = 1;
+    showControlsDialog(owner);
+    gStartPage = 0;
+    return;
+  }
   EnableWindow(owner, TRUE);
   SetForegroundWindow(owner);
-  gDialog = nullptr;
 }

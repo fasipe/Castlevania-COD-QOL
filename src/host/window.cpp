@@ -29,7 +29,10 @@ std::wstring gTitle;
 // The title says which proportion is on and which keys change the picture and the settings.
 void updateTitle(HWND hwnd) {
   const std::wstring mode = settings().wide ? L"16:9" : L"4:3";
-  SetWindowTextW(hwnd, (gTitle + L"  |  " + mode + L"  |  Alt+Enter: tela cheia  |  F10: 4:3 / 16:9  |  F9: FPS  |  F1: opções e controles").c_str());
+  SetWindowTextW(hwnd, (gTitle + L"  |  " + mode +
+                        (english() ? L"  |  Alt+Enter: full screen  |  F10: 4:3 / 16:9  |  F9: FPS  |  F1: options and controls"
+                                   : L"  |  Alt+Enter: tela cheia  |  F10: 4:3 / 16:9  |  F9: FPS  |  F1: opções e controles"))
+                           .c_str());
 }
 
 // Alt+Enter / F11: borderless window covering the monitor, and back.
@@ -138,6 +141,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
           std::fill(std::begin(gHeld), std::end(gHeld), false);
           gKeyboard = {};
           showControlsDialog(hwnd);
+          updateTitle(hwnd);  // in the language chosen there
         }
         return 0;
       }
