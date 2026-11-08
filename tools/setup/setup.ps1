@@ -173,10 +173,19 @@ function Start-Phase($phase, $logFile) {
   $run = Join-Path $root "build\setup-$phase.bat"
   $bat = Join-Path $root 'tools\setup\build-game.bat'
   Set-Content $run "@echo off`r`ncall `"$bat`" $phase > `"$logFile`" 2>&1`r`nexit /b %errorlevel%`r`n" -Encoding Default
+  $script:started = Get-Date
   $p = Start-Process $run -WindowStyle Hidden -PassThru
   $p.Handle | Out-Null  # held, or its exit code is lost once it ends
   if ($phase -eq 'rest') { try { $p.PriorityClass = 'BelowNormal' } catch {} }
   return $p
+}
+
+# How long the phase took, said in the window and kept in its log.
+function Took($logFile) {
+  $s = [int]((Get-Date) - $script:started).TotalSeconds
+  $line = (T 'Took ' 'Levou ') + $s + ' s.'
+  try { Add-Content $logFile "`r`n$line" } catch {}
+  return $line
 }
 
 $script:job = $null
@@ -204,6 +213,7 @@ $timer.Add_Tick({
     $ok = $script:job.ExitCode -eq 0 -and (Ready)
     $script:job = $null
     $bar.Style = 'Continuous'
+    $took = Took $log
     if ($ok) {
       $shell = New-Object -ComObject WScript.Shell
       $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Castlevania - Curse of Darkness.lnk'))
@@ -212,7 +222,8 @@ $timer.Add_Tick({
       $icon = Join-Path $root 'build\castlevania.ico'
       if (Test-Path $icon) { $link.IconLocation = "$icon,0" }
       $link.Save()
-      $progress.Text = T 'Ready to play. Finishing the rest in the background.' 'Pronto para jogar. O resto termina em segundo plano.'
+      $progress.Text = (T 'Ready to play. Finishing the rest in the background. ' 'Pronto para jogar. O resto termina em segundo plano. ') + $took
+      $output.AppendText("`r`n$took")
       $output.AppendText((T "`r`n--- The game can be played now (shortcut on the desktop). The functions it seldom runs are still being optimized, at low priority; until then they run more slowly. This window can be closed.`r`n`r`n" "`r`n--- Já dá para jogar (atalho na área de trabalho). As funções que o jogo raramente usa ainda estão sendo otimizadas, com prioridade baixa; até lá elas rodam mais devagar. Esta janela pode ser fechada.`r`n`r`n"))
       $script:rest = Start-Phase 'rest' $restLog
     } else {
@@ -225,7 +236,9 @@ $timer.Add_Tick({
     $ok = $script:rest.ExitCode -eq 0
     $script:rest = $null
     $bar.Value = $bar.Maximum
-    $progress.Text = if ($ok) { T 'All done.' 'Tudo pronto.' } else { T 'The rest failed (the game still runs): see below.' 'O resto falhou (o jogo roda assim mesmo): veja abaixo.' }
+    $took = Took $restLog
+    $output.AppendText("`r`n$took`r`n")
+    $progress.Text = if ($ok) { (T 'All done. ' 'Tudo pronto. ') + $took } else { T 'The rest failed (the game still runs): see below.' 'O resto falhou (o jogo roda assim mesmo): veja abaixo.' }
     Refresh-State
   }
 })

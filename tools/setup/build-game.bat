@@ -27,6 +27,7 @@ if not defined ONLY (
   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
   cmake --build build --target codport || exit /b 1
 )
+echo %time% translating the game / traduzindo o jogo
 build\codport.exe --recompile tools\recomp\functions.txt recomp\gen || exit /b 1
 set "VUBLOCKS=tools\recomp\vu-blocks.idx"
 if exist recomp\vu-blocks.txt set "VUBLOCKS=%VUBLOCKS%;recomp\vu-blocks.txt"
@@ -34,9 +35,13 @@ build\codport.exe --vu-recompile "%VUBLOCKS%" recomp\vu || exit /b 1
 rem The shortcut's icon: the game's memory card icon, drawn from the disc (no harm if it fails).
 build\codport.exe --make-icon build\castlevania.ico
 cmake -S . -B %OUT% -G Ninja -DCMAKE_BUILD_TYPE=Release %ONLY% || exit /b 1
+echo %time% compiling / compilando
 cmake --build %OUT% --target codport_game || exit /b 1
+echo %time% done / pronto
 exit /b 0
 
 :rest
+echo %time% compiling / compilando
 cmake --build %OUT% --target codport_game_cold || exit /b 1
+echo %time% done / pronto
 exit /b 0
