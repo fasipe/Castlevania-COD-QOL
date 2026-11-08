@@ -43,7 +43,6 @@ Make an ISO image of your disc with any disc imaging tool. The image is only eve
 ### To Play
 
 - Windows 10 or 11, 64-bit.
-- A processor with AVX2 (Intel Haswell, AMD Ryzen or newer).
 - A Direct3D 11 graphics card that supports rasterizer ordered views and double precision in shaders (developed on a GeForce GTX 1060). Without them the game draws on the processor, much more slowly.
 
 ### To Build
@@ -204,7 +203,6 @@ Faça uma imagem ISO do seu disco com qualquer programa de imagem de disco. A im
 ### Para Jogar
 
 - Windows 10 ou 11, 64 bits.
-- Processador com AVX2 (Intel Haswell, AMD Ryzen ou mais novos).
 - Placa de vídeo com Direct3D 11 e suporte a *rasterizer ordered views* e a precisão dupla nos shaders (desenvolvido numa GeForce GTX 1060). Sem isso o jogo desenha no processador, bem mais devagar.
 
 ### Para Compilar
