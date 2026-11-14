@@ -54,9 +54,10 @@ void setWindowSize(void* window, int width, int height);
 // the options page calls settingsChanged() after each change.
 void onSettingsChanged(std::function<void()> apply);
 void settingsChanged();
-// The FPS counter's text, called once per picture shown: "shown/possible" frames per second, the
-// second without the game's 50/60 Hz pace; empty when the counter is off (F9).
-std::string fpsText();
+// The FPS counter's text, called once per picture of the game: "shown/possible" frames per second,
+// the second without the game's 50/60 Hz pace; empty when the counter is off (F9). `shownEach`:
+// pictures shown for each of the game's (more with interpolation).
+std::string fpsText(double shownEach = 1);
 // Where "possible" comes from: the working seconds so far of each part that takes its turn every
 // frame (threads' CPU time, the graphics card's time), the busiest of which sets the pace.
 void setWorkClocks(std::function<std::vector<double>()> clocks);

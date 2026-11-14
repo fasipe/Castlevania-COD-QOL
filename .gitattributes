@@ -1,0 +1,3 @@
+# Run by Linux's shell and Python as they are: no CR at the line ends, whatever the checkout's setting.
+*.sh text eol=lf
+tools/setup/linux-setup.py text eol=lf

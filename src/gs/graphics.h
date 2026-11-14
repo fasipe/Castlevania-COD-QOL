@@ -45,9 +45,16 @@ public:
     idle_.wait(lock, ready);
   }
   double cpuSeconds();
+  // `tick` runs on the thread once per nudge(), between batches (any thread may nudge). Setting it
+  // waits for a tick in progress.
+  void setTick(std::function<void()> tick);
+  void nudge();
 
 private:
   void run();
+  std::function<void()> tick_;
+  int nudged_ = 0;  // nudges not yet ticked
+  bool ticking_ = false;
   std::string name_;
   bool fastCore_;
   Handler handler_;
@@ -90,19 +97,22 @@ public:
   void drain();  // waits until the threads have done everything queued (EE thread only)
   // Draws on the graphics card (Gs::useGpu), showing pictures in `window` (an HWND, or null).
   bool useGpu(void* window, uint32_t scale, std::string& error);
+  // The drawing resolution changed while the game runs (Gs::setScale); false (with `error`) if the
+  // graphics card could not take it, the old one kept.
+  bool setScale(void* window, uint32_t scale, std::string& error);
   // Once per VBlank: marks the frame and, with `picture`, has the picture as of now built in the
   // background (Gs::queueFrame). The EE waits here if the threads are more than a frame behind,
   // and the previous frame's GS events reach the CSR.
   void vblank(bool picture);
+  // The camera's view (radians) in the picture this VBlank shows, for interpolation; NaN if unknown.
+  float viewYaw = 0, viewPitch = 0;
+  bool viewPlaying = false;  // and whether the game is being played in it (not a menu: no interpolation)
   double vuThreadCpuSeconds() { return vuThread_.cpuSeconds(); }
   double gsThreadCpuSeconds() { return gsThread_.cpuSeconds(); }
 
   Dmac dmac;
   Gs gs;
   Gif gif;
-  u128 vu1Vf[32]{};
-  uint32_t vu1Vi[32]{};
-  u128 vu1Acc{};
   VuMicro vu0Micro, vu1;
   Vif vif0, vif1;
   Ipu ipu;

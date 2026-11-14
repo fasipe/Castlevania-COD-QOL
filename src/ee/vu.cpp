@@ -228,7 +228,7 @@ const VuMicro::Pair& VuMicro::decode(uint32_t pc) {
     else if ((opc >= 0x20 && opc <= 0x21) || (opc >= 0x24 && opc <= 0x25) || (opc >= 0x28 && opc <= 0x29) || (opc >= 0x2C && opc <= 0x2F))
       L(lowerBranch), p.imm = int32_t(lo << 21) >> 21;
     else if (opc == 0x04 || opc == 0x05) L(lowerInteger), p.imm = int32_t(lo << 21) >> 21;
-    else if ((opc >= 0x10 && opc <= 0x13) || opc == 0x18 || opc == 0x1A || opc == 0x1B || opc == 0x1C) L(lowerInteger);
+    else if ((opc >= 0x10 && opc <= 0x18) || opc == 0x1A || opc == 0x1B || opc == 0x1C) L(lowerInteger);
     else if (opc == 0x08) L(lowerIaddiu), p.imm = int32_t(((lo >> 10) & 0x7800) | (lo & 0x7FF));
     else if (opc == 0x09) L(lowerIsubiu), p.imm = int32_t(((lo >> 10) & 0x7800) | (lo & 0x7FF));
     else if (opc == 0x40) {
@@ -243,6 +243,9 @@ const VuMicro::Pair& VuMicro::decode(uint32_t pc) {
       else if ((lo & 63) >= 0x3C && lfn2 == 0x3D) (p.lft && p.ldest ? L(lowerMfir) : L(lowerNop));
       else if ((lo & 63) >= 0x3C && lfn2 == 0x3C) L(lowerMtir);
       else if ((lo & 63) >= 0x3C && lfn2 >= 0x38 && lfn2 <= 0x3A) L(lowerDiv);
+      else if ((lo & 63) >= 0x3C && lfn2 == 0x31) (p.ldest && p.lft ? L(lowerMr32) : L(lowerNop));
+      else if ((lo & 63) >= 0x3C && lfn2 == 0x40) L(lowerRnext);
+      else if ((lo & 63) >= 0x3C && lfn2 == 0x64) (p.ldest && p.lft ? L(lowerMfp) : L(lowerNop));
       else if ((lo & 63) >= 0x3C && (lfn2 == 0x3B || lfn2 == 0x7B)) L(lowerNop);  // WAITQ/WAITP: the pair already waited
       else if ((lo & 63) >= 0x3C && lfn2 == 0x6C) L(lowerXgkick);
     }
@@ -363,6 +366,17 @@ struct RoundTowardZero {
 }  // namespace
 
 void VuMicro::run(uint32_t startAddr) {
+  if (!outside_.vf) return execute(startAddr);
+  std::memcpy(vf_, outside_.vf, sizeof vf_);
+  std::memcpy(vi_, outside_.vi, sizeof vi_);
+  acc_ = *outside_.acc;
+  execute(startAddr);
+  std::memcpy(outside_.vf, vf_, sizeof vf_);
+  std::memcpy(outside_.vi, vi_, sizeof vi_);
+  *outside_.acc = acc_;
+}
+
+void VuMicro::execute(uint32_t startAddr) {
   ScopedTimer timer(runNanos);
   if (codeTouches && *codeTouches != seenTouches_) seenTouches_ = *codeTouches, codeChanged();
   // More compiled blocks since the last run: blocks looked up before are looked up again.
@@ -378,7 +392,13 @@ void VuMicro::run(uint32_t startAddr) {
     if (entry && !branchPending_ && !ending) {
       if (blocks_.empty()) blocks_.assign(codeBytes_ / 8, BlockCache{});
       BlockCache& b = blocks_[pc / 8];
-      if (b.generation != generation_) b.generation = generation_, b.fn = findBlock(pc);
+      if (b.generation != generation_) {
+        b.generation = generation_;
+        if (!b.fn || std::memcmp(code_ + pc, b.code.data(), b.code.size()) != 0) {
+          b.fn = findBlock(pc);
+          if (b.fn) b.code.assign(code_ + pc, code_ + pc + size_t(blockLength(pc)) * 8);
+        }
+      }
       if (b.fn) {
         pc = b.fn(*this) & (codeBytes_ - 1);
         if (!fault.empty()) {
@@ -409,7 +429,7 @@ void VuMicro::run(uint32_t startAddr) {
     // runs; if both write it, the upper one wins.
     pairStall(p.waitQ, p.waitP);
     if (p.setAside) {
-      u128& reg = r_.vf[p.setAside];
+      u128& reg = vf_[p.setAside];
       const u128 before = reg;
       p.upper(*this, p);
       const u128 upperResult = reg;
@@ -419,11 +439,11 @@ void VuMicro::run(uint32_t startAddr) {
     } else {
       p.upper(*this, p);
       if (p.iBit)  // the lower word is a float loaded into I
-        r_.vi[kVuI] = p.lo;
+        vi_[kVuI] = p.lo;
       else
         p.lower(*this, p, pc);
     }
-    r_.vi[0] = 0;
+    vi_[0] = 0;
     if (!fault.empty()) {
       fault += std::format(" at 0x{:04X}", pc);
       return;
@@ -464,8 +484,8 @@ int VuMicro::pLatency(uint32_t lo) {
 }
 
 void VuMicro::lower(uint32_t op, uint32_t pc) {
-  uint32_t* vi = r_.vi;
-  u128* vf = r_.vf;
+  uint32_t* vi = vi_;
+  u128* vf = vf_;
   const uint32_t it = (op >> 16) & 15, is = (op >> 11) & 15, ft = (op >> 16) & 31, fs = (op >> 11) & 31;
   const uint32_t dest = (op >> 21) & 0xF;
   const int32_t imm11 = int32_t(op << 21) >> 21;

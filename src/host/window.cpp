@@ -17,6 +17,7 @@
 
 #include "host/controls_dialog.h"
 #include "host/icon.h"
+#include "host/screenshot.h"
 #include "host/settings.h"
 #include "iop/pad.h"
 
@@ -124,6 +125,18 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (!(lp & (1 << 30))) {
           settings().minimap = !settings().minimap;
           settings().save();
+        }
+        return 0;
+      }
+      if (wp == VK_F12) {  // a screenshot, in screenshots\ next to the memory card folder
+        if (!(lp & (1 << 30))) {
+          SYSTEMTIME t;
+          GetLocalTime(&t);
+          std::filesystem::path dir = iconFile().parent_path();
+          if (dir.filename() == "build") dir = dir.parent_path();
+          wchar_t name[64];
+          swprintf(name, 64, L"castlevania-%04u%02u%02u-%02u%02u%02u.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+          requestScreenshot(dir / L"screenshots" / name);
         }
         return 0;
       }
@@ -348,7 +361,7 @@ void setWorkClocks(std::function<std::vector<double>()> clocks) {
 
 void* currentThreadHandle() { return OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId()); }
 
-std::string fpsText() {
+std::string fpsText(double shownEach) {
   static LARGE_INTEGER frequency{}, since{};
   static int frames = 0, shown = 0, possible = 0;
   static std::vector<double> lastClocks;
@@ -365,8 +378,8 @@ std::string fpsText() {
     }
     double busiest = 0;
     for (size_t i = 0; i < clocks.size() && i < lastClocks.size(); ++i) busiest = std::max(busiest, clocks[i] - lastClocks[i]);
-    shown = int(frames / elapsed + 0.5);
-    possible = busiest > 0 ? int(std::min(frames / busiest, 9999.0) + 0.5) : shown;
+    shown = int(frames * shownEach / elapsed + 0.5);
+    possible = busiest > 0 ? int(std::min(frames * shownEach / busiest, 9999.0) + 0.5) : shown;
     lastClocks = std::move(clocks), frames = 0, since = now;
   }
   if (!settings().showFps) return {};

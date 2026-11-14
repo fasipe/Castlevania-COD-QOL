@@ -47,16 +47,16 @@ std::string pairOps(const VuMicro::Pair& p, const std::string& name, uint32_t pc
     out += std::format("  uint32_t {};\n", flags);
     upper = std::format("{} = {}(m, {});", flags, fn, name);
   }
-  const std::string lower = p.iBit ? std::format("m.r_.vi[kVuI] = 0x{:08X}u;", p.lo)
+  const std::string lower = p.iBit ? std::format("m.vi_[kVuI] = 0x{:08X}u;", p.lo)
                                    : std::format("{}(m, {}, 0x{:04X}u);", p.lowerName, name, pc);
   if (p.setAside) {
-    out += std::format("  {{\n    u128& reg = m.r_.vf[{}];\n    const u128 before = reg;\n    {}\n    const u128 result = reg;\n"
+    out += std::format("  {{\n    u128& reg = m.vf_[{}];\n    const u128 before = reg;\n    {}\n    const u128 result = reg;\n"
                        "    reg = before;\n    {}\n    reg = result;\n  }}\n",
                        p.setAside, upper, lower);
   } else {
     out += "  " + upper + "\n  " + lower + "\n";
   }
-  out += "  m.r_.vi[0] = 0;\n";
+  out += "  m.vi_[0] = 0;\n";
   return out;
 }
 
@@ -125,69 +125,96 @@ std::string blockFunction(const Block& b, const std::string& fname) {
 
   // Usual version: the pipeline worked out here. cyc = pairs (and stall cycles) since entry.
   // A Q or P result still on its way from an earlier block counts down at run time (qIn, pIn)
-  // until this block issues its own; a block that waits for Q or P stalls by an amount known
-  // only then, so it takes the general version.
+  // until this block issues its own: caught up (as one pair at a time would have) only where
+  // something may read Q or P, issues its own, or the block ends. A block that waits for Q or P
+  // stalls by an amount known only then, so it takes the general version.
   bool waits = false;
   for (const VuMicro::Pair& p : pairs) waits = waits || p.waitQ || p.waitP;
-  out += std::format("uint32_t {}(VuMicro& m) {{\n", fname);
-  if (waits) out += std::format("  if (m.qDelay_ > 0 || m.pDelay_ > 0) return {}_s(m);\n", fname);
-  else out += "  int qIn = m.qDelay_, pIn = m.pDelay_;\n";
-  out += constants() + "  const uint64_t base = m.cycle_;\n";
-  struct Flags {
-    int pushed;  // cycle of the instruction
-    std::string var;
-  };
-  std::vector<Flags> inFlight;
-  int cyc = 0, qd = 0, pd = 0;
-  bool usesQ = false, usesP = false;
-  auto arrive = [&](int now) {  // flags due by cycle `now`, oldest first
-    std::string a;
-    while (!inFlight.empty() && inFlight.front().pushed + 4 <= now) {
-      a += std::format("  vuops::writeMac(m.r_.vi, {});\n", inFlight.front().var);
-      inFlight.erase(inFlight.begin());
+  // Two of it: one for when nothing is on its way from earlier blocks (the usual case: no checks
+  // at all), one that checks what is.
+  auto usual = [&](bool clean) {
+    std::string out;
+    out += std::format("uint32_t {}{}(VuMicro& m) {{\n", fname, clean ? "_c" : "_u");
+    if (!clean) {
+      if (waits) out += std::format("  if (m.qDelay_ > 0 || m.pDelay_ > 0) return {}_s(m);\n", fname);
+      else out += "  int qIn = m.qDelay_, pIn = m.pDelay_;\n";
     }
-    return a;
-  };
-  branched = false;
-  for (int i = 0; i < n; ++i) {
-    const VuMicro::Pair& p = pairs[size_t(i)];
-    const uint32_t pc = b.pc + uint32_t(i) * 8;
-    ++cyc;
-    if (cyc <= 4) out += std::format("  m.settleAt(base + {});\n", cyc);  // queued by earlier blocks
-    out += arrive(cyc);
-    if (qd > 0 && --qd == 0) out += "  m.r_.vi[kVuQ] = m.pendingQ_;\n";
-    if (pd > 0 && --pd == 0) out += "  m.p_ = m.pendingP_;\n";
-    if (!waits && !usesQ) out += "  if (qIn > 0 && --qIn == 0) m.r_.vi[kVuQ] = m.pendingQ_;\n";
-    if (!waits && !usesP) out += "  if (pIn > 0 && --pIn == 0) m.p_ = m.pendingP_;\n";
-    if (branched) out += kTake;
-    if ((p.waitQ && qd > 0) || (p.waitP && pd > 0)) {  // as VuMicro::pairStall
-      const int stall = std::max(p.waitQ ? qd : 0, p.waitP ? pd : 0);
-      if (qd > 0 && (p.waitQ || qd <= stall)) out += "  m.r_.vi[kVuQ] = m.pendingQ_;\n", qd = 0;
-      else if (qd > 0) qd -= stall;
-      if (pd > 0 && (p.waitP || pd <= stall)) out += "  m.p_ = m.pendingP_;\n", pd = 0;
-      else if (pd > 0) pd -= stall;
-      if (cyc < 4) out += std::format("  m.settleUpTo(base + {});\n", cyc + stall);
-      cyc += stall;
+    out += constants() + "  const uint64_t base = m.cycle_;\n";
+    struct Flags {
+      int pushed;  // cycle of the instruction
+      std::string var;
+    };
+    std::vector<Flags> inFlight;
+    int cyc = 0, qd = 0, pd = 0;
+    bool usesQ = false, usesP = false;
+    int qAt = 0, pAt = 0;  // cycle the run-time countdowns stand at
+    auto catchUp = [&](const char* left, const char* reg, int& at) {
+      std::string c;
+      if (cyc > at)
+        c = std::format("  if ({0} > 0) {{\n    if ({0} <= {1}) {2} = m.pending{3}_, {0} = 0;\n    else {0} -= {1};\n  }}\n", left, cyc - at, reg,
+                        left[0] == 'q' ? "Q" : "P");
+      at = cyc;
+      return c;
+    };
+    auto arrive = [&](int now) {  // flags due by cycle `now`, oldest first
+      std::string a;
+      while (!inFlight.empty() && inFlight.front().pushed + 4 <= now) {
+        a += std::format("  vuops::writeMac(m.vi_, {});\n", inFlight.front().var);
+        inFlight.erase(inFlight.begin());
+      }
+      return a;
+    };
+    bool branched = false;
+    for (int i = 0; i < n; ++i) {
+      const VuMicro::Pair& p = pairs[size_t(i)];
+      const uint32_t pc = b.pc + uint32_t(i) * 8;
+      ++cyc;
+      if (cyc <= 4 && !clean) out += std::format("  m.settleAt(base + {});\n", cyc);  // queued by earlier blocks
       out += arrive(cyc);
+      if (qd > 0 && --qd == 0) out += "  m.vi_[kVuQ] = m.pendingQ_;\n";
+      if (pd > 0 && --pd == 0) out += "  m.p_ = m.pendingP_;\n";
+      const std::string upperName = p.upperName;
+      const bool readsQ = !p.iBit && (p.lower == &VuMicro::lowerGeneric || p.lower == &VuMicro::lowerDiv);
+      const bool readsP = !p.iBit && (p.lower == &VuMicro::lowerGeneric || p.lower == &VuMicro::lowerMfp);
+      if (!waits && !usesQ && !clean && (readsQ || p.upper == &VuMicro::upperGeneric || upperName.find("kQ") != std::string::npos))
+        out += catchUp("qIn", "m.vi_[kVuQ]", qAt);
+      if (!waits && !usesP && !clean && readsP) out += catchUp("pIn", "m.p_", pAt);
+      if (branched) out += kTake;
+      if ((p.waitQ && qd > 0) || (p.waitP && pd > 0)) {  // as VuMicro::pairStall
+        const int stall = std::max(p.waitQ ? qd : 0, p.waitP ? pd : 0);
+        if (qd > 0 && (p.waitQ || qd <= stall)) out += "  m.vi_[kVuQ] = m.pendingQ_;\n", qd = 0;
+        else if (qd > 0) qd -= stall;
+        if (pd > 0 && (p.waitP || pd <= stall)) out += "  m.p_ = m.pendingP_;\n", pd = 0;
+        else if (pd > 0) pd -= stall;
+        if (cyc < 4 && !clean) out += std::format("  m.settleUpTo(base + {});\n", cyc + stall);
+        cyc += stall;
+        out += arrive(cyc);
+      }
+      const bool pushes = pushesFlags(p);
+      const std::string var = pushes ? std::format("f{}", i) : "";
+      out += pairOps(p, std::format("p{}", i), pc, var);
+      if (pushes) inFlight.push_back({cyc, var});
+      if (!p.iBit) {
+        if (const int q = VuMicro::qLatency(p.lo); q && p.lower == &VuMicro::lowerDiv) qd = q, usesQ = true;
+        if (const int l = VuMicro::pLatency(p.lo); l && p.lower == &VuMicro::lowerGeneric) pd = l, usesP = true;
+      }
+      branched = branched || (!p.iBit && lowerBranches(p.lo));
     }
-    const bool pushes = pushesFlags(p);
-    const std::string var = pushes ? std::format("f{}", i) : "";
-    out += pairOps(p, std::format("p{}", i), pc, var);
-    if (pushes) inFlight.push_back({cyc, var});
-    if (!p.iBit) {
-      if (const int q = VuMicro::qLatency(p.lo); q && p.lower == &VuMicro::lowerDiv) qd = q, usesQ = true;
-      if (const int l = VuMicro::pLatency(p.lo); l && p.lower == &VuMicro::lowerGeneric) pd = l, usesP = true;
-    }
-    branched = branched || (!p.iBit && lowerBranches(p.lo));
-  }
-  out += std::format("  m.instructions += {};\n  m.cycle_ = base + {};\n", n, cyc);
-  for (const Flags& f : inFlight)
-    out += std::format("  m.pendingFlags_[(base + {0}) & 3] = {{base + {1}, {2}, true}};\n", f.pushed, f.pushed + 4, f.var);
-  if (usesQ) out += std::format("  m.qDelay_ = {};\n", qd);
-  else if (!waits) out += "  m.qDelay_ = qIn;\n";
-  if (usesP) out += std::format("  m.pDelay_ = {};\n", pd);
-  else if (!waits) out += "  m.pDelay_ = pIn;\n";
-  out += ending(branched) + "}\n\n";
+    if (!waits && !usesQ && !clean) out += catchUp("qIn", "m.vi_[kVuQ]", qAt);
+    if (!waits && !usesP && !clean) out += catchUp("pIn", "m.p_", pAt);
+    out += std::format("  m.instructions += {};\n  m.cycle_ = base + {};\n", n, cyc);
+    for (const Flags& f : inFlight)
+      out += std::format("  m.pendingFlags_[(base + {0}) & 3] = {{base + {1}, {2}, true}};\n", f.pushed, f.pushed + 4, f.var);
+    if (usesQ) out += std::format("  m.qDelay_ = {};\n", qd);
+    else if (!waits && !clean) out += "  m.qDelay_ = qIn;\n";
+    if (usesP) out += std::format("  m.pDelay_ = {};\n", pd);
+    else if (!waits && !clean) out += "  m.pDelay_ = pIn;\n";
+    out += ending(branched) + "}\n\n";
+    return out;
+  };
+  out += usual(true) + usual(false);
+  out += std::format("uint32_t {0}(VuMicro& m) {{\n  if ((m.qDelay_ | m.pDelay_) == 0 && !(m.pendingFlags_[0].valid | m.pendingFlags_[1].valid | "
+                     "m.pendingFlags_[2].valid | m.pendingFlags_[3].valid))\n    return {0}_c(m);\n  return {0}_u(m);\n}}\n\n", fname);
   return out;
 }
 }  // namespace

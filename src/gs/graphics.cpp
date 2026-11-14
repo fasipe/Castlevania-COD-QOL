@@ -1,6 +1,7 @@
 #include "gs/graphics.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <utility>
 
@@ -79,12 +80,38 @@ bool WorkThread::wait() {
 
 double WorkThread::cpuSeconds() { return threadCpuSeconds(thread_.native_handle()); }
 
+void WorkThread::setTick(std::function<void()> tick) {
+  std::unique_lock lock(mutex_);
+  idle_.wait(lock, [&] { return !ticking_; });
+  tick_ = std::move(tick);
+}
+
+void WorkThread::nudge() {
+  {
+    std::lock_guard lock(mutex_);
+    nudged_ = std::min(nudged_ + 1, 4);
+  }
+  wake_.notify_one();
+}
+
 void WorkThread::run() {
   if (fastCore_) claimFastCore();
   sampleThisThread(name_);
   std::unique_lock lock(mutex_);
   for (;;) {
-    wake_.wait(lock, [&] { return stop_ || !queue_.empty(); });
+    wake_.wait(lock, [&] { return stop_ || nudged_ || !queue_.empty(); });
+    if (nudged_) {  // one tick per nudge, however many came while it was busy
+      --nudged_;
+      if (tick_) {
+        ticking_ = true;
+        lock.unlock();
+        tick_();
+        lock.lock();
+        ticking_ = false;
+        idle_.notify_all();
+      }
+      continue;
+    }
     if (queue_.empty()) return;
     std::vector<uint8_t> batch = std::move(queue_.front());
     queue_.pop_front();
@@ -111,7 +138,7 @@ Graphics::Graphics(Memory& mem)
     : dmac(mem),
       gif(gs),
       vu0Micro(VuRegs{nullptr, nullptr, nullptr}, mem.hostPtr(kVu0Code, 4096), 4096, mem.hostPtr(kVu0Data, 4096), 4096),
-      vu1(VuRegs{vu1Vf, vu1Vi, &vu1Acc}, mem.hostPtr(kVu1Code, 16384), 16384, mem.hostPtr(kVu1Data, 16384), 16384),
+      vu1(VuRegs{nullptr, nullptr, nullptr}, mem.hostPtr(kVu1Code, 16384), 16384, mem.hostPtr(kVu1Data, 16384), 16384),
       vif0(0, mem.hostPtr(kVu0Code, 4096), 4096, mem.hostPtr(kVu0Data, 4096), 4096, vu0Micro),
       vif1(1, mem.hostPtr(kVu1Code, 16384), 16384, mem.hostPtr(kVu1Data, 16384), 16384, vu1),
       ipu(dmac),
@@ -121,8 +148,8 @@ Graphics::Graphics(Memory& mem)
       gsThread_("graphics (GS)", false, [this](const WorkThread::Header& h, const u128* d) { gsWork(h, d); }),
       vuThread_("graphics (VU1)", true, [this](const WorkThread::Header& h, const u128* d) { vuWork(h, d); },
                 [this] { gsThread_.publish(); }) {
-  vu1Vf[0].f[3] = 1.0f;
-  vu1Vi[kVuR] = 0x3F800000;
+  vu1.vf_[0].f[3] = 1.0f;
+  vu1.vi_[kVuR] = 0x3F800000;
   uint8_t* vu1Data = mem.hostPtr(kVu1Data, 16384);
   vu1.codeTouches = &mem.vuCodeTouches;
   // XGKICK: the packets are copied out of VU1 memory now, for the GS thread.
@@ -148,6 +175,7 @@ Graphics::Graphics(Memory& mem)
 }
 
 Graphics::~Graphics() {
+  gs.onRefresh({});  // no more ticks for the GS thread
   vuThread_.publish();
   hw_.beforeGsImr = nullptr;
 }
@@ -210,7 +238,23 @@ void Graphics::raiseEvents(uint64_t bits) {
 
 bool Graphics::useGpu(void* window, uint32_t scale, std::string& error) {
   drain();
-  return gs.useGpu(window, scale, error);
+  if (!gs.useGpu(window, scale, error)) return false;
+  // Interpolation shows pictures at each refresh of the screen, from the GS thread.
+  gsThread_.setTick([this] { gs.tick(); });
+  gs.onRefresh([this] { gsThread_.nudge(); });
+  return true;
+}
+
+bool Graphics::setScale(void* window, uint32_t scale, std::string& error) {
+  drain();
+  gs.onRefresh({});        // no more ticks while the GPU is made again
+  gsThread_.setTick({});
+  const bool ok = gs.setScale(window, scale, error);
+  if (gs.usingGpu()) {
+    gsThread_.setTick([this] { gs.tick(); });
+    gs.onRefresh([this] { gsThread_.nudge(); });
+  }
+  return ok;
 }
 
 void Graphics::drain() {
@@ -233,7 +277,13 @@ void Graphics::setUiLayerChain(uint32_t start, uint32_t end, bool narrow) {
 }
 
 void Graphics::vblank(bool picture) {
-  vuThread_.post(kFrame, picture, nullptr, 0);
+  // When the VBlank came (steady clock, nanoseconds): the picture's moment, for interpolation.
+  struct {
+    uint64_t stamp;
+    float yaw, pitch;
+    uint32_t playing, pad[3];
+  } shown{uint64_t(std::chrono::steady_clock::now().time_since_epoch() / std::chrono::nanoseconds(1)), viewYaw, viewPitch, viewPlaying, {}};
+  vuThread_.post(kFrame, picture, &shown, 2);
   publish();
   const uint64_t frame = framesPosted_++;
   if (frame == 0) return;
@@ -257,7 +307,17 @@ void Graphics::gsWork(const WorkThread::Header& h, const u128* data) {
     case kPrivWrite: gs.writePriv(h.addr, h.arg); break;
     case kUiLayer: gs.setUiLayer(h.arg != 0); break;
     case kFrame:
-      if (h.arg) gs.queueFrame();
+      if (h.qwc) {
+        uint64_t stamp;
+        float view[2];
+        uint32_t playing;
+        std::memcpy(&stamp, data, 8), std::memcpy(view, reinterpret_cast<const uint8_t*>(data) + 8, 8);
+        std::memcpy(&playing, reinterpret_cast<const uint8_t*>(data) + 16, 4);
+        gs.setView(view[0], view[1], playing != 0);
+        if (h.arg) gs.queueFrame(stamp);
+      } else if (h.arg) {
+        gs.queueFrame(0);
+      }
       gs.frameEnd();
       frameEvents_[gsFrames_ & 3] = std::exchange(gs.csrEvents, 0);
       framesDone_.store(++gsFrames_, std::memory_order_release);

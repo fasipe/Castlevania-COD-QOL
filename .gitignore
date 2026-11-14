@@ -17,3 +17,6 @@
 # Imagens de disco do jogo
 *.iso
 /build-game/
+/textures/
+# Ferramentas e objetos do Setup-Linux.sh
+/build-linux/

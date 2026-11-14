@@ -283,6 +283,25 @@ int4 filteredTexel(Prim p, float fu, float fv, uint layer) {
   return sum >> 8;
 }
 
+#ifdef CACHED_TEXTURES
+// filteredTexel for a texture in a region mode (REGION_CLAMP, REGION_REPEAT), which the GPU's
+// sampler cannot do: the same four texels and weights, read from the decoded texture rather than
+// decoded from GS memory each time (the smoke in front of the giant, 2x2 per pixel at 4x).
+int4 cachedRegionTexel(Prim p, float fu, float fv) {
+  const int au = floorToInt((fu - 0.5) * 16.0), av = floorToInt((fv - 0.5) * 16.0);
+  const int wu = au & 15, wv = av & 15;
+  int4 sum = int4(0, 0, 0, 0);
+  [loop] for (int n = 0; n < 4; ++n) {
+    const int ou = n & 1, ov = n >> 1;
+    const int weight = (ou != 0 ? wu : 16 - wu) * (ov != 0 ? wv : 16 - wv);
+    if (weight == 0) continue;
+    const int x = wrapCoord((au >> 4) + ou, p.tw, p.wms, p.minu, p.maxu), y = wrapCoord((av >> 4) + ov, p.th, p.wmt, p.minv, p.maxv);
+    sum += int4(round(cachedTex.Load(int3(x, y, 0)) * 255.0)) * weight;
+  }
+  return sum >> 8;
+}
+#endif
+
 // uint(z) for 0 <= z < 2^32, from double operations every D3D11 device with doubles has.
 uint doubleToUint(double z) {
   double hiD = z * (1.0 / 65536.0);
@@ -333,8 +352,9 @@ int4 shadeWith(Prim p, int4 c, float s, float t, float q, float u, float v, floa
     if (fl & F_LINEAR) {
       int4 tf;
 #ifdef CACHED_TEXTURES
-      if (fl & F_CACHED)  // the GPU's filter samples half a texel back too
-        tf = int4(round(cachedTex.SampleLevel(cachedSampler, float2(tx / float(p.tw), ty / float(p.th)), 0) * 255.0));
+      if (fl & F_CACHED)  // the GPU's filter samples half a texel back too (not in the region modes)
+        tf = p.wms > 1 || p.wmt > 1 ? cachedRegionTexel(p, tx, ty)
+                                    : int4(round(cachedTex.SampleLevel(cachedSampler, float2(tx / float(p.tw), ty / float(p.th)), 0) * 255.0));
       else
 #endif
         tf = filteredTexel(p, tx, ty, layer);
@@ -501,8 +521,13 @@ cbuffer FastPass : register(b0) {
   uint exact;     // an exact blend: the shader computes ((A - B) * C) >> 7, the GPU adds Cd if D is
   uint weighted;  // the usual blend: the shader weighs Cs, the GPU adds Cd * (1 - C / 128)
   uint destRead;  // the whole blend here, as the GS, the destination read from a copy of the frame buffer
+  float zBias;
+  uint lowDepth;  // LOWRES: the depth test here, against depthCopy: 1 a 24 or 32-bit buffer, 2 a 16-bit one
 };
 Texture2D<float4> destCopy : register(t5);
+#ifdef LOWRES
+Texture2D<float> depthCopy : register(t7);
+#endif
 cbuffer PrimState : register(b2) { Prim primState; };
 struct Out {
   float4 colour : SV_Target0;
@@ -523,9 +548,23 @@ struct Out {
 Out main(POSITION_INPUT, noperspective float4 colour : COLOUR,
          noperspective float4 stqf : STQF, noperspective float2 uv : TEXUV) {
   const Prim p = primState;
+#ifdef LOWRES
+  // LOWRES: drawn at the GS's resolution, a pixel standing for its middle sample (drawLowRes).
+  int sxs = int(pos.x) * SCALE + SCALE / 2, sys = int(pos.y) * SCALE + SCALE / 2;
+#else
   int sxs = int(pos.x), sys = int(pos.y);
+#endif
   int x = sxs / SCALE, y = sys / SCALE;
   if (x < p.sx0 || x > p.sx1 || y < p.sy0 || y > p.sy1) discard;
+#ifdef LOWRES
+  if (lowDepth) {  // as the GPU tests the depth it would have been given (see EXPORT_DEPTH and zBias)
+    const float stored = depthCopy.Load(int3(sxs, sys, 0));
+    float zs, zd = stored;
+    if (lowDepth == 2) zs = round(saturate(pos.z) * 65535.0), zd = round(stored * 65535.0);
+    else zs = min(floor(pos.z / zScale + 1e-3), float(p.zmax)) * zScale;
+    if (p.ztst == 2 ? zs < zd : zs <= zd) discard;
+  }
+#endif
   if (passMode == 3) {  // the second pass of a subtracting blend: with MAX, floors the result at 0
     Out none;
     none.colour = 0, none.factor = 0;
@@ -546,6 +585,16 @@ Out main(POSITION_INPUT, noperspective float4 colour : COLOUR,
   int factor = ((p.blendSel >> 4) & 3) == 0 ? c.a : p.fix;
   int a = (p.flags & F_FBA) ? (c.a | 0x80) : c.a;
   Out o;
+#ifdef LOWRES
+  // The weighed source, as below, and C / 128 for the GPU to gather the layers' colour (C * (1 - C')
+  // + Cs') and what they let through of what is under them (T * (1 - C')); the alpha written.
+  {
+    const float f = float(factor) / 128.0, loss = 0.5 - float(min(factor & -factor, 128)) / 256.0;
+    o.colour = float4((((p.blendSel & 3) == 0 ? float3(c.rgb) * f : float3(0, 0, 0)) - loss) / 255.0, f);
+    o.factor = float4(float(a & 0xFF) / 255.0, 0, 0, 0);
+    return o;
+  }
+#endif
 #if EXPORT_DEPTH
   o.depth = min(floor(pos.z / zScale + 1e-3), float(p.zmax)) * zScale;  // as the GS, clamped to what the buffer holds
 #endif
@@ -908,6 +957,27 @@ float4 main(float4 pos : SV_Position) : SV_Target {
   over(c, gold(saturate(0.25 - side / 0.08)), cover(side));
   c.a *= alpha;
   return c;
+}
+)";
+
+// A run drawn at the GS's resolution (drawLowRes) over its surface: the layers' colour C added to
+// what they let through T of the surface, alpha the last layer's where one was drawn.
+inline constexpr const char* kLowResOverPs = R"(
+Texture2D<float4> layers : register(t0);  // C, T
+Texture2D<float> last : register(t1);     // alpha / 255; 0 where none was drawn
+SamplerState smooth : register(s1);
+cbuffer Size : register(b0) { float2 texel; };  // 1 / the size of layers
+struct Out {
+  float4 colour : SV_Target0;
+  float4 factor : SV_Target1;
+};
+Out main(float4 pos : SV_Position) {
+  const float4 l = layers.SampleLevel(smooth, pos.xy / SCALE * texel, 0);
+  const float a = last.Load(int3(int2(pos.xy) / SCALE, 0));
+  Out o;
+  o.colour = float4(l.rgb, a);
+  o.factor = float4(l.aaa, a > 0 ? 1 : 0);
+  return o;
 }
 )";
 

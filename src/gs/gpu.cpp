@@ -5,13 +5,16 @@
 #include <windows.h>
 #include <d3d11_3.h>
 #include <d3dcompiler.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <atomic>
 #include <bitset>
+#include <chrono>
 #include <map>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <cmath>
 #include <cstring>
@@ -21,8 +24,14 @@
 
 #include "gs/color.h"
 #include "gs/draw.h"
+#include "gs/frame_gen.h"
 #include "gs/gpu_shaders.h"
+#include "gs/shader_cache.h"
+#include "gs/texture_pack.h"
 #include "game/minimap.h"
+#include "host/icon.h"
+#include "host/screenshot.h"
+#include "host/settings.h"
 #include "host/window.h"
 
 using Microsoft::WRL::ComPtr;
@@ -91,15 +100,7 @@ void quad(std::vector<Vtx>& out, float x0, float y0, float x1, float y1, uint32_
   quad(out, x0, y0, x1, y1, prim, scale, all, all, all, all);
 }
 
-ComPtr<ID3DBlob> compile(const std::string& source, const char* target, std::string& error) {
-  ComPtr<ID3DBlob> code, errors;
-  if (FAILED(D3DCompile(source.data(), source.size(), nullptr, nullptr, nullptr, "main", target,
-                        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors))) {
-    error = errors ? std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()) : "shader compilation failed";
-    return nullptr;
-  }
-  return code;
-}
+ComPtr<ID3DBlob> compile(const std::string& source, const char* target, std::string& error) { return compileShader(source, target, error); }
 }  // namespace
 
 struct GsGpu::Impl {
@@ -181,6 +182,7 @@ struct GsGpu::Impl {
     ComPtr<ID3D11ShaderResourceView> srv;
     uint64_t memory = ~0ull;  // the write counts it was decoded at
     uint64_t lastUse = 0;
+    uint64_t content = 0;  // its hash for texture packs (contentOf); 0 if it has none
   };
   std::unordered_map<TexKey, TexEntry, TexKeyHash> texCache;
   size_t texCacheBytes = 0;
@@ -189,6 +191,15 @@ struct GsGpu::Impl {
   ComPtr<ID3D11ComputeShader> decodeCs;
   ComPtr<ID3D11SamplerState> texSamplers[4];  // linear; bit 0: S clamped, bit 1: T clamped (else repeated)
   ID3D11ShaderResourceView* decoded(const Gs::Draw& d);
+  // Texture packs (gs/texture_pack.h): the hash of a texture uploaded whole (with its palette's,
+  // if it has one), or 0; the palette content of each slot, likewise; the textures loaded in place
+  // of the game's (null for a file that could not be read).
+  TexturePack pack;
+  std::vector<uint64_t> slotContent = std::vector<uint64_t>(kClutSlots);
+  std::unordered_map<uint64_t, ComPtr<ID3D11ShaderResourceView>> replaced;
+  uint64_t contentOf(const Gs::Draw& d) const;
+  void dumpTexture(ID3D11Texture2D* tex, uint32_t w, uint32_t h, uint64_t hash);
+  ID3D11ShaderResourceView* replacement(uint64_t hash);
   // Per state of the batch: its decoded texture (F_CACHED), and which run last looked.
   std::vector<ID3D11ShaderResourceView*> stateTex;
   std::vector<uint64_t> stateRun;
@@ -215,6 +226,29 @@ struct GsGpu::Impl {
   uint64_t mapVersion = 0;
   uint32_t mapSize = 0;
   void drawMap(const MinimapView& view, float left, float top, uint32_t size);
+  // Interpolation (Settings::interpolation): pictures shown for each of the game's, as many as the
+  // screen's refresh holds (1 without it, or when the game outruns real time, as in fast loading).
+  std::unique_ptr<FrameGen> frameGen;
+  bool frameGenFailed = false;
+  FrameGen* generator();
+  // Its pace: a thread waits on the swap chain for each refresh of the screen and wakes the
+  // thread that draws (onRefresh), which shows the picture of that moment (tick): the game's
+  // pictures a little late, each moment between two made from them.
+  HANDLE refreshWait = nullptr;  // the swap chain's: signalled when it takes another picture
+  std::thread refreshThread;
+  std::atomic<bool> refreshStop = false, interpolating = false, ticked = false;  // ticked: a picture shown by tick since interpolation began
+  std::mutex callMutex;  // ticks against calls from the EE thread (picture, readMemory)
+  double stampA = 0, stampB = 0;  // the two latest pictures' VBlanks (seconds)
+  double frameSeconds = 1 / 59.94, lag = 0;  // between VBlanks; the most a picture came after its own
+  std::array<double, 120> delays{};  // ... of the latest pictures
+  double refreshHz = 60;
+  uint64_t presents = 0;
+  std::string fps;  // the counter's text, from the game's last picture
+  FrameGen::View view;  // the camera's in the next picture (setView)
+  bool playing = false;  // the game is being played in it (setView)
+  bool target(RECT& rc);  // the window's size, the back buffer made to fit it; false if none
+  // The picture (`srv`) in the window, then the minimap and the counter.
+  void show(ID3D11ShaderResourceView* srv, const RECT& rc);
   ComPtr<ID3D11BlendState> overBlend;  // the counter's box over the picture
   ComPtr<ID3D11SamplerState> pointSampler, linearSampler;
   ComPtr<ID3D11Buffer> constants;  // 256 bytes
@@ -243,8 +277,43 @@ struct GsGpu::Impl {
   // What a surface holds now in these GS pixels, for a draw into it to read.
   ID3D11ShaderResourceView* snapshot(Surface& sf, int x0, int y0, int x1, int y1);
   ComPtr<ID3D11BlendState> floorBlend;  // MAX of the result and the shader's 0
+  // Runs of many see-through layers over a large part of the screen (the smoke of the giant
+  // breaking the wall: about 200), above 1x: drawn at the GS's resolution, gathering their colour
+  // and what they let through, then over the surface in one go. The surface keeps its detail
+  // under them; only the layers are as the PS2 draws them.
+  ComPtr<ID3D11PixelShader> lowResPs, lowResOverPs;
+  ComPtr<ID3D11Texture2D> lowTex, lowLastTex;
+  ComPtr<ID3D11RenderTargetView> lowRtv, lowLastRtv;
+  ComPtr<ID3D11ShaderResourceView> lowSrv, lowLastSrv;
+  uint32_t lowW = 0, lowH = 0;
+  ComPtr<ID3D11BlendState> lowBlend[2], lowOverBlend[2];  // by whether alpha is written
+  bool lowResRun(const std::vector<Gs::Command>& commands, size_t first, size_t end, int x0, int y0, int x1, int y1, bool destRead) const;
+  bool drawLowRes(size_t first, size_t end, const Gs::Draw& d, int depth, float zScale, bool alpha, int x0, int y0, int x1, int y1,
+                  const Surface& cs);
   ComPtr<ID3D11DepthStencilState> noDepth;
   std::vector<Surface> surfaces;
+  // The depth of the last 3D scene drawn, for interpolation: kept when its depth buffer is cleared
+  // (the game clears it again for other passes before the picture is shown).
+  std::vector<int> drew3D;  // per surface: runs of depth-tested drawing since it was last cleared
+  ComPtr<ID3D11Texture2D> sceneDepth;
+  ComPtr<ID3D11ShaderResourceView> sceneDepthSrv;
+  bool sceneDepth16 = false, sceneDepthNew = false;
+  int lastDepth = -1;  // the depth surface depth-tested last
+  void keepSceneDepth(int depth);
+  int sceneDepthOf = -1;  // the surface it was kept from
+  // The picture's depth for interpolation: the depth buffer as the frame left it, and the scene's
+  // before the characters were drawn over it, when a 3D scene was drawn since the last picture
+  // (else none: menus, movies).
+  struct PictureDepth {
+    ID3D11ShaderResourceView* depth = nullptr;
+    ID3D11ShaderResourceView* scene = nullptr;
+  };
+  PictureDepth pictureDepth() {
+    PictureDepth z;
+    if (sceneDepthNew && lastDepth >= 0 && lastDepth == sceneDepthOf) z = {surfaces[size_t(lastDepth)].srv.Get(), sceneDepthSrv.Get()};
+    sceneDepthNew = false;
+    return z;
+  }
   using Pages = std::bitset<512>;
   std::array<int, 512> owner{};  // the surface holding each page, or -1
   Pages memStale, ownerStale;    // the owner has newer pixels than memory / memory than the owner
@@ -252,6 +321,13 @@ struct GsGpu::Impl {
   Pages rendered;                // drawn into since the CPU last wrote there
   // How often memory in each 256-byte block has been written (or may have been).
   std::vector<uint32_t> blockWrites = std::vector<uint32_t>(16384);
+  // Which upload last wrote each block (its data's hash, its first block), with the block's write
+  // count then: a texture whose blocks all still hold one upload's data has that upload's content.
+  struct BlockSource {
+    uint64_t hash = 0;
+    uint32_t dbp = 0, writes = 0;
+  };
+  std::vector<BlockSource> blockSource = std::vector<BlockSource>(16384);
   void wrote(const Pages& pages) {
     for (size_t p = 0; p < 512; ++p)
       if (pages[p])
@@ -281,7 +357,7 @@ struct GsGpu::Impl {
   }
   std::map<uint32_t, ComPtr<ID3D11BlendState>> blendStates;
   std::map<uint32_t, ComPtr<ID3D11DepthStencilState>> depthStates;
-  uint64_t fastDraws = 0, slowDraws = 0, syncs = 0;
+  uint64_t fastDraws = 0, slowDraws = 0, syncs = 0, lowResRuns = 0;
   // The graphics card's working time (with a window, or CODPORT_GPU_TIME set): timestamps around
   // each piece of work, by kind, read a few frames late.
   enum Work { kIdle, kSlow, kFast, kFlush, kLoad, kUpload, kCopy, kClut, kPicture, kWorks };
@@ -686,6 +762,13 @@ bool GsGpu::Impl::init(void* window, std::string& error) {
   if (!fastCode || !fastDepthCode || !depthCode) return false;
   dev->CreatePixelShader(fastCode->GetBufferPointer(), fastCode->GetBufferSize(), nullptr, &fastPs);
   dev->CreatePixelShader(fastDepthCode->GetBufferPointer(), fastDepthCode->GetBufferSize(), nullptr, &fastDepthPs);
+  if (scale > 1) {
+    ComPtr<ID3DBlob> lowCode = compile(with(roT3, ("#define CACHED_TEXTURES\n#define EXPORT_DEPTH 0\n#define LOWRES\n" + fastBody).c_str()), "ps_5_0", error);
+    ComPtr<ID3DBlob> overCode = compile(scaleDefine + gpu_hlsl::kLowResOverPs, "ps_5_0", error);
+    if (!lowCode || !overCode) return false;
+    dev->CreatePixelShader(lowCode->GetBufferPointer(), lowCode->GetBufferSize(), nullptr, &lowResPs);
+    dev->CreatePixelShader(overCode->GetBufferPointer(), overCode->GetBufferSize(), nullptr, &lowResOverPs);
+  }
   dev->CreatePixelShader(depthCode->GetBufferPointer(), depthCode->GetBufferSize(), nullptr, &memToDepthPs);
   const std::string countSource = std::string("#define COUNT 1\n") + gpu_hlsl::kMemToSurfaceCs;
   for (const Cs& cs : {Cs{rw, gpu_hlsl::kSurfaceToMemCs, &surfaceToMemCs}, Cs{ro, gpu_hlsl::kMemToSurfaceCs, &memToSurfaceCs},
@@ -772,9 +855,14 @@ bool GsGpu::Impl::init(void* window, std::string& error) {
     DXGI_SWAP_CHAIN_DESC1 scd{};
     scd.Format = DXGI_FORMAT_R8G8B8A8_UNORM, scd.SampleDesc.Count = 1, scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.BufferCount = 2, scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    scd.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;  // interpolation's pace
     if (FAILED(factory->CreateSwapChainForHwnd(dev.Get(), hwnd, &scd, nullptr, nullptr, &swapChain)))
       return error = "no swap chain for the window", false;
     factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+    if (ComPtr<IDXGISwapChain2> chain2; SUCCEEDED(swapChain.As(&chain2))) {
+      chain2->SetMaximumFrameLatency(1);
+      refreshWait = chain2->GetFrameLatencyWaitableObject();
+    }
   }
   return true;
 }
@@ -1231,13 +1319,19 @@ std::unique_ptr<GsGpu> GsGpu::create(void* window, uint32_t scale, std::string& 
   gpu->impl_ = std::make_unique<Impl>();
   gpu->impl_->scale = std::clamp(scale, 1u, 4u);
   if (!gpu->impl_->init(window, error)) return nullptr;
+  if (window) {  // texture packs in textures/ next to the memory card folder (not in headless runs)
+    std::filesystem::path dir = iconFile().parent_path();
+    if (dir.filename() == "build") dir = dir.parent_path();
+    gpu->impl_->pack.open(dir / "textures", settings().texturePack, settings().dumpTextures);
+  }
   return gpu;
 }
 
 GsGpu::~GsGpu() {
+  if (impl_) onRefresh({});
   if (impl_ && std::getenv("CODPORT_GPU_STATS"))
-    std::printf("   GPU: %llu hardware draw calls, %llu GS-memory ones, %llu surface syncs, %zu surfaces\n",
-                (unsigned long long)impl_->fastDraws, (unsigned long long)impl_->slowDraws, (unsigned long long)impl_->syncs,
+    std::printf("   GPU: %llu hardware draw calls (%llu runs at the GS's resolution), %llu GS-memory ones, %llu surface syncs, %zu surfaces\n",
+                (unsigned long long)impl_->fastDraws, (unsigned long long)impl_->lowResRuns, (unsigned long long)impl_->slowDraws, (unsigned long long)impl_->syncs,
                 impl_->surfaces.size());
 }
 
@@ -1528,7 +1622,18 @@ void GsGpu::Impl::drawFast(const std::vector<Gs::Command>& commands, size_t firs
     if (sprites && area == int64_t(cx1 - cx0 + 1) * (cy1 - cy0 + 1)) cleared = wholePages(d.fbp, d.fbw, d.fpsm, cx0, cy0, cx1, cy1);
   }
   use(colour, drawnColour, cleared);
-  if (depth >= 0) use(depth, drawnDepth);
+  if (depth >= 0) {
+    use(depth, drawnDepth);
+    lastDepth = depth;
+    if (drew3D.size() < surfaces.size()) drew3D.resize(surfaces.size());
+    const Surface& ds = surfaces[size_t(depth)];
+    if (d.zwrite && d.ztst == 1 && x0 <= 0 && y0 <= 0 && uint32_t(x1 + 1) >= std::min(ds.width, 512u) && uint32_t(y1 + 1) >= std::min(ds.height, 448u)) {
+      if (drew3D[size_t(depth)] >= 4) keepSceneDepth(depth);  // a clear of a scene's depth (not of one run, a shadow's): kept first
+      drew3D[size_t(depth)] = 0;
+    } else if (d.ztst >= 2) {
+      ++drew3D[size_t(depth)];
+    }
+  }
   // The texture: from a colour surface holding all it reads, or from memory.
   ID3D11ShaderResourceView* texSrv = nullptr;
   uint32_t texSourceKind = 0;
@@ -1596,7 +1701,9 @@ void GsGpu::Impl::drawFast(const std::vector<Gs::Command>& commands, size_t firs
     drawStates(first, end);
   };
   const bool zwrite = d.ztest && d.zwrite;
-  if (!d.ate || d.atst == 1 || d.afail == 0) {  // failing samples are dropped (or there are none)
+  if (lowResRun(commands, first, end, x0, y0, x1, y1, destRead) && drawLowRes(first, end, d, depth, zScale, alpha, x0, y0, x1, y1, cs)) {
+    // drawn at the GS's resolution
+  } else if (!d.ate || d.atst == 1 || d.afail == 0) {  // failing samples are dropped (or there are none)
     if (!d.ate || d.atst != 0 || d.afail != 0) pass(0, rgb, alpha, zwrite);
   } else {  // those passing as usual, then those failing with what the AFAIL mode keeps
     if (d.atst != 0) pass(1, rgb, alpha, zwrite);
@@ -1627,8 +1734,8 @@ void GsGpu::Impl::drawFast(const std::vector<Gs::Command>& commands, size_t firs
   ctx->OMSetRenderTargets(0, nullptr, nullptr);
   ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
   ctx->OMSetDepthStencilState(nullptr, 0);
-  ID3D11ShaderResourceView* none[7] = {};
-  ctx->PSSetShaderResources(0, 7, none);
+  ID3D11ShaderResourceView* none[8] = {};
+  ctx->PSSetShaderResources(0, 8, none);
   // Those pages now have newer pixels in the surfaces than in memory.
   wrote(drawnColour);
   if (zwrite) wrote(drawnDepth);
@@ -1638,8 +1745,142 @@ void GsGpu::Impl::drawFast(const std::vector<Gs::Command>& commands, size_t firs
   ++fastDraws;
 }
 
+// Whether a run goes the low resolution way (see lowResPs): above 1x, many layers blended over
+// what is under them (Cs * C + Cd * (1 - C), or Cd * (1 - C)), each the same at every sample of a
+// pixel but for its depth test, which writes neither depth nor anything the gathering loses (the
+// alpha written is the last layer's, never 0, to tell where one was drawn).
+bool GsGpu::Impl::lowResRun(const std::vector<Gs::Command>& commands, size_t first, size_t end, int x0, int y0, int x1, int y1,
+                            bool destRead) const {
+  static const bool off = std::getenv("CODPORT_NOLOWRES") != nullptr;  // for comparisons
+  const Gs::Draw& d = commands[first].d;
+  if (off || !lowResPs || destRead || counting(d) || !weightedBlend(d) || d.bc == 1 || d.date || (d.fbmsk & 0x00FFFFFFu) ||
+      (d.ztest && d.zwrite) || end - first < 8)
+    return false;
+  if (d.ate && (d.atst == 0 || (d.atst != 1 && d.afail != 0))) return false;  // all of it in one pass
+  const int64_t box = int64_t(x1 - x0 + 1) * (y1 - y0 + 1);
+  if (box < 128 * 128) return false;
+  const bool alpha = !d.fb24 && (d.fbmsk & 0xFF000000u) == 0;
+  int64_t area = 0;
+  for (size_t k = first; k < end; ++k) {
+    const Gs::Draw& c = commands[k].d;
+    if (alpha && !c.fba && !(c.ate && ((c.atst == 6) || (c.atst == 5 && c.aref > 0) || (c.atst == 4 && c.aref > 0) || (c.atst == 7 && c.aref == 0))))
+      return false;  // it could write an alpha of 0
+    int a0, b0, a1, b1;
+    coverage(commands[k], a0, b0, a1, b1);
+    if (a1 >= a0 && b1 >= b0) area += int64_t(a1 - a0 + 1) * (b1 - b0 + 1);
+  }
+  return area >= 3 * box;  // layers over layers: where drawing each at every sample costs
+}
+
+bool GsGpu::Impl::drawLowRes(size_t first, size_t end, const Gs::Draw& d, int depth, float zScale, bool alpha, int x0, int y0, int x1,
+                             int y1, const Surface& cs) {
+  if (!lowTex || lowW < cs.width || lowH < cs.height) {
+    lowW = std::max(lowW, cs.width), lowH = std::max(lowH, cs.height);
+    D3D11_TEXTURE2D_DESC td{lowW, lowH, 1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, {1, 0}, D3D11_USAGE_DEFAULT,
+                            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0, 0};
+    lowTex.Reset(), lowLastTex.Reset(), lowRtv.Reset(), lowLastRtv.Reset(), lowSrv.Reset(), lowLastSrv.Reset();
+    dev->CreateTexture2D(&td, nullptr, &lowTex);
+    td.Format = DXGI_FORMAT_R8_UNORM;
+    dev->CreateTexture2D(&td, nullptr, &lowLastTex);
+    if (!lowTex || !lowLastTex) return false;  // drawn as usual
+    dev->CreateRenderTargetView(lowTex.Get(), nullptr, &lowRtv), dev->CreateShaderResourceView(lowTex.Get(), nullptr, &lowSrv);
+    dev->CreateRenderTargetView(lowLastTex.Get(), nullptr, &lowLastRtv), dev->CreateShaderResourceView(lowLastTex.Get(), nullptr, &lowLastSrv);
+  }
+  const int w = alpha ? 1 : 0;
+  if (!lowBlend[w]) {
+    D3D11_BLEND_DESC bd{};
+    bd.IndependentBlendEnable = TRUE;
+    D3D11_RENDER_TARGET_BLEND_DESC& rt = bd.RenderTarget[0];
+    rt.BlendEnable = TRUE;
+    rt.SrcBlend = D3D11_BLEND_ONE, rt.DestBlend = D3D11_BLEND_INV_SRC_ALPHA, rt.BlendOp = D3D11_BLEND_OP_ADD;
+    rt.SrcBlendAlpha = D3D11_BLEND_ZERO, rt.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA, rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    bd.RenderTarget[1].RenderTargetWriteMask = alpha ? D3D11_COLOR_WRITE_ENABLE_RED : 0;
+    dev->CreateBlendState(&bd, &lowBlend[w]);
+    D3D11_BLEND_DESC od{};
+    D3D11_RENDER_TARGET_BLEND_DESC& o = od.RenderTarget[0];
+    o.BlendEnable = TRUE;
+    o.SrcBlend = D3D11_BLEND_ONE, o.DestBlend = D3D11_BLEND_SRC1_COLOR, o.BlendOp = D3D11_BLEND_OP_ADD;
+    o.SrcBlendAlpha = D3D11_BLEND_SRC1_ALPHA, o.DestBlendAlpha = D3D11_BLEND_INV_SRC1_ALPHA, o.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    o.RenderTargetWriteMask = UINT8(D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE |
+                                    (alpha ? D3D11_COLOR_WRITE_ENABLE_ALPHA : 0));
+    dev->CreateBlendState(&od, &lowOverBlend[w]);
+  }
+  // The layers, at the GS's resolution.
+  const float clearLayers[4] = {0, 0, 0, 1}, clearLast[4] = {};
+  ctx->ClearRenderTargetView(lowRtv.Get(), clearLayers);
+  ctx->ClearRenderTargetView(lowLastRtv.Get(), clearLast);
+  ID3D11RenderTargetView* rtvs[2] = {lowRtv.Get(), lowLastRtv.Get()};
+  ctx->OMSetRenderTargets(2, rtvs, nullptr);
+  const bool depth16 = d.zpsm == PSMZ16 || d.zpsm == PSMZ16S;
+  const bool tested = d.ztest && d.ztst >= 2 && depth >= 0;
+  ID3D11ShaderResourceView* depthSrv = tested ? surfaces[size_t(depth)].srv.Get() : nullptr;
+  ctx->PSSetShaderResources(7, 1, &depthSrv);
+  const struct {
+    uint32_t mode;
+    float zScale;
+    uint32_t count, exact, weighted, dest;
+    float zBias;
+    uint32_t lowDepth;
+  } c{0, zScale, 0, 0, 1, 0, d.ztest && depth16 ? 0.45f : 0.0f, tested ? (depth16 ? 2u : 1u) : 0u};
+  setConstants(&c, sizeof(c));
+  ctx->PSSetConstantBuffers(0, 1, constants.GetAddressOf());
+  ctx->VSSetConstantBuffers(0, 1, constants.GetAddressOf());
+  const D3D11_VIEWPORT low{0, 0, 2048.0f, 2048.0f, 0, 1};
+  ctx->RSSetViewports(1, &low);
+  ctx->PSSetShader(lowResPs.Get(), nullptr, 0);
+  ctx->OMSetBlendState(lowBlend[w].Get(), nullptr, 0xFFFFFFFF);
+  ctx->OMSetDepthStencilState(noDepth.Get(), 0);
+  {
+    Busy busy(*this, kFast);
+    drawStates(first, end);
+  }
+  // Over the surface, in the run's box.
+  ID3D11ShaderResourceView* noDepthSrv = nullptr;
+  ctx->PSSetShaderResources(7, 1, &noDepthSrv);
+  ctx->OMSetRenderTargets(1, cs.rtv.GetAddressOf(), nullptr);
+  const float size[4] = {1.0f / float(lowW), 1.0f / float(lowH)};
+  setConstants(size, sizeof(size));
+  ID3D11ShaderResourceView* layers[2] = {lowSrv.Get(), lowLastSrv.Get()};
+  ctx->PSSetShaderResources(0, 2, layers);
+  ctx->PSSetSamplers(1, 1, linearSampler.GetAddressOf());
+  const D3D11_VIEWPORT box{float(x0 * int(scale)), float(y0 * int(scale)), float((x1 - x0 + 1) * int(scale)), float((y1 - y0 + 1) * int(scale)), 0, 1};
+  ctx->RSSetViewports(1, &box);
+  ctx->IASetInputLayout(nullptr);
+  ctx->VSSetShader(presentVs.Get(), nullptr, 0);
+  ctx->PSSetShader(lowResOverPs.Get(), nullptr, 0);
+  ctx->OMSetBlendState(lowOverBlend[w].Get(), nullptr, 0xFFFFFFFF);
+  {
+    Busy busy(*this, kFast);
+    ctx->Draw(3, 0);
+  }
+  bindDrawInput(true);
+  ++lowResRuns;
+  return true;
+}
+
+void GsGpu::Impl::keepSceneDepth(int depth) {
+  const Surface& ds = surfaces[size_t(depth)];
+  D3D11_TEXTURE2D_DESC td{};
+  ds.tex->GetDesc(&td);
+  D3D11_TEXTURE2D_DESC have{};
+  if (sceneDepth) sceneDepth->GetDesc(&have);
+  if (!sceneDepth || have.Width != td.Width || have.Height != td.Height || have.Format != td.Format) {
+    sceneDepth.Reset(), sceneDepthSrv.Reset();
+    D3D11_TEXTURE2D_DESC kd = td;
+    kd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(dev->CreateTexture2D(&kd, nullptr, &sceneDepth))) return;
+    sceneDepth16 = td.Format == DXGI_FORMAT_R16_TYPELESS;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    sd.Format = sceneDepth16 ? DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R32_FLOAT, sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D, sd.Texture2D.MipLevels = 1;
+    dev->CreateShaderResourceView(sceneDepth.Get(), &sd, &sceneDepthSrv);
+  }
+  ctx->CopyResource(sceneDepth.Get(), ds.tex.Get());
+  sceneDepthNew = true, sceneDepthOf = depth;
+}
+
 ID3D11ShaderResourceView* GsGpu::Impl::decoded(const Gs::Draw& d) {
-  if (!d.linear || d.wms > 1 || d.wmt > 1) return nullptr;  // the region modes stay in the shader
+  if (!d.linear) return nullptr;
   const bool paletted = d.tpsm == PSMT8 || d.tpsm == PSMT4 || d.tpsm == PSMT8H || d.tpsm == PSMT4HL || d.tpsm == PSMT4HH;
   const TexKey key{d.tbp, d.tbw, d.tpsm, uint32_t(d.tw), uint32_t(d.th), paletted ? d.clutSlot : 0, paletted ? slotUses[d.clutSlot] : 0,
                    paletted ? d.csa : 0, paletted ? 0 : d.ta0 | d.ta1 << 8 | uint32_t(d.aem) << 16};
@@ -1671,7 +1912,10 @@ ID3D11ShaderResourceView* GsGpu::Impl::decoded(const Gs::Draw& d) {
   e->lastUse = ++texUse;
   if (e->memory != memory) {
     e->memory = memory;
-    const GpuPrim p = stateOf(d);
+    // Every texel as it is in memory: the wrap modes apply when it is read (in a region mode,
+    // the shader's cachedRegionTexel; otherwise the sampler).
+    GpuPrim p = stateOf(d);
+    p.wms = p.wmt = 0;
     D3D11_MAPPED_SUBRESOURCE map;
     if (FAILED(ctx->Map(primStateBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) return nullptr;
     std::memcpy(map.pData, &p, offsetof(GpuPrim, pl));
@@ -1688,8 +1932,74 @@ ID3D11ShaderResourceView* GsGpu::Impl::decoded(const Gs::Draw& d) {
     ID3D11UnorderedAccessView* noUav = nullptr;
     ctx->CSSetShaderResources(0, 4, noSrvs);
     ctx->CSSetUnorderedAccessViews(0, 1, &noUav, nullptr);
+    e->content = contentOf(d);
+    if (e->content && pack.shouldDump(e->content)) dumpTexture(e->tex.Get(), uint32_t(d.tw), uint32_t(d.th), e->content);
   }
+  // A texture pack's picture in its place, when the GPU's sampler can read it (not the region
+  // modes, which address the game's texels).
+  if (e->content && d.wms <= 1 && d.wmt <= 1)
+    if (ID3D11ShaderResourceView* r = replacement(e->content)) return r;
   return e->srv.Get();
+}
+
+uint64_t GsGpu::Impl::contentOf(const Gs::Draw& d) const {
+  // Every block of the texture still as one upload left it (the game uploads 4- and 8-bit
+  // textures in other formats, and several in one go): that upload, and where in it.
+  uint64_t source = 0;
+  uint32_t dbp = 0;
+  bool whole = true;
+  forBlocks(d.tbp, d.tbw, d.tpsm, 0, 0, uint32_t(d.tw) - 1, uint32_t(d.th) - 1, [&](uint32_t b) {
+    const BlockSource& s = blockSource[b];
+    if (!s.hash || s.writes != blockWrites[b] || (source && (s.hash != source || s.dbp != dbp))) whole = false;
+    source = s.hash, dbp = s.dbp;
+  });
+  if (!whole || !source) return 0;
+  const bool paletted = d.tpsm == PSMT8 || d.tpsm == PSMT4 || d.tpsm == PSMT8H || d.tpsm == PSMT4HL || d.tpsm == PSMT4HH;
+  const uint64_t palette = paletted ? slotContent[d.clutSlot] : 0;
+  if (paletted && !palette) return 0;
+  uint64_t h = source;
+  for (uint64_t v : {uint64_t(d.tbp - dbp), uint64_t(d.tbw), uint64_t(d.tpsm), uint64_t(d.tw), uint64_t(d.th), palette, uint64_t(paletted ? d.csa : d.ta0 | d.ta1 << 8 | uint32_t(d.aem) << 16)})
+    h = (h ^ v) * 0x9E3779B97F4A7C15ull;
+  return h | 1;
+}
+
+void GsGpu::Impl::dumpTexture(ID3D11Texture2D* tex, uint32_t w, uint32_t h, uint64_t hash) {
+  D3D11_TEXTURE2D_DESC td{};
+  tex->GetDesc(&td);
+  td.Usage = D3D11_USAGE_STAGING, td.BindFlags = 0, td.CPUAccessFlags = D3D11_CPU_ACCESS_READ, td.MiscFlags = 0;
+  ComPtr<ID3D11Texture2D> staging;
+  D3D11_MAPPED_SUBRESOURCE map;
+  if (FAILED(dev->CreateTexture2D(&td, nullptr, &staging))) return;
+  ctx->CopyResource(staging.Get(), tex);
+  if (FAILED(ctx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &map))) return;
+  std::vector<uint8_t> rgba(size_t(w) * h * 4);
+  for (uint32_t y = 0; y < h; ++y)
+    for (uint32_t x = 0; x < w; ++x) {
+      const uint8_t* s = static_cast<const uint8_t*>(map.pData) + size_t(y) * map.RowPitch + x * 4;
+      uint8_t* o = rgba.data() + (size_t(y) * w + x) * 4;
+      o[0] = s[0], o[1] = s[1], o[2] = s[2], o[3] = uint8_t(std::min(255, s[3] * 2));  // the PS2's 128 is opaque
+    }
+  ctx->Unmap(staging.Get(), 0);
+  savePng(pack.dumpFile(hash), w, h, rgba.data(), w * 4);
+}
+
+ID3D11ShaderResourceView* GsGpu::Impl::replacement(uint64_t hash) {
+  const std::filesystem::path* file = pack.replacement(hash);
+  if (!file) return nullptr;
+  auto [it, fresh] = replaced.try_emplace(hash);
+  if (fresh) {
+    uint32_t w = 0, h = 0;
+    std::vector<uint8_t> rgba;
+    if (loadPng(*file, w, h, rgba)) {
+      for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = uint8_t((rgba[i] + 1) / 2);  // back to the PS2's alpha
+      D3D11_TEXTURE2D_DESC td{w, h, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0}, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, 0, 0};
+      const D3D11_SUBRESOURCE_DATA data{rgba.data(), w * 4, 0};
+      ComPtr<ID3D11Texture2D> tex;
+      if (SUCCEEDED(dev->CreateTexture2D(&td, &data, &tex))) dev->CreateShaderResourceView(tex.Get(), nullptr, &it->second);
+    }
+    if (!it->second) std::printf("texture pack: could not read %s\n", file->string().c_str());
+  }
+  return it->second.Get();
 }
 
 void GsGpu::upload(uint64_t bitbltbuf, uint64_t trxpos, uint64_t trxreg, const std::vector<uint64_t>& data) {
@@ -1705,13 +2015,17 @@ void GsGpu::upload(uint64_t bitbltbuf, uint64_t trxpos, uint64_t trxreg, const s
   {
     const uint32_t dbp = bits(bitbltbuf, 32, 14), dbw = bits(bitbltbuf, 48, 6);
     const uint32_t x1 = uint32_t(dx) + rrw - 1, y1 = uint32_t(dy) + rrh - 1;
-    Impl::forBlocks(dbp, dbw, dpsm, uint32_t(dx), uint32_t(dy), x1, y1, [&](uint32_t b) { ++m.blockWrites[b]; });
     uint64_t lane[4] = {1, 2, 3, 4};
     size_t i = 0;
     for (; i + 4 <= data.size(); i += 4)
       for (int k = 0; k < 4; ++k) lane[k] = (lane[k] ^ data[i + k]) * 0x9E3779B97F4A7C15ull;
     for (; i < data.size(); ++i) lane[0] = (lane[0] ^ data[i]) * 0x9E3779B97F4A7C15ull;
     const uint64_t hash = ((lane[0] * 31 + lane[1]) * 31 + lane[2]) * 31 + lane[3] + data.size();
+    const uint64_t source = (hash ^ (uint64_t(dpsm) << 32 | uint64_t(dx) << 16 | uint32_t(dy))) | 1;
+    Impl::forBlocks(dbp, dbw, dpsm, uint32_t(dx), uint32_t(dy), x1, y1, [&](uint32_t b) {
+      ++m.blockWrites[b];
+      m.blockSource[b] = {source, dbp, m.blockWrites[b]};
+    });
     m.uploads[dbp] = {dbw, dpsm, uint32_t(dx), uint32_t(dy), x1, y1, hash, m.writesOf(dbp, dbw, dpsm, uint32_t(dx), uint32_t(dy), x1, y1)};
   }
   m.rendered &= ~uploaded;
@@ -1775,6 +2089,12 @@ uint32_t GsGpu::loadClut(uint32_t previous, uint32_t cbp, uint32_t clutPsm, uint
   if (auto it = m.clutCache.find(m.clutOfSlot[slot]); it != m.clutCache.end() && it->second == slot) m.clutCache.erase(it);
   ++m.slotUses[slot];
   m.clutOfSlot[slot] = key;
+  m.slotContent[slot] = 0;
+  if (key.known) {
+    uint64_t h = key.memory;
+    for (uint64_t v : {uint64_t(clutPsm), uint64_t(csm), uint64_t(csa), uint64_t(t8), uint64_t(key.texclut), uint64_t(key.texa)}) h = (h ^ v) * 0x9E3779B97F4A7C15ull;
+    m.slotContent[slot] = h | 1;
+  }
   m.clutCache[key] = slot;
   const uint32_t c[13] = {previous, slot, cbp, clutPsm, csm, csa, t8, bits(texclut, 0, 6), bits(texclut, 6, 6), bits(texclut, 12, 10),
                           bits(texa, 0, 8), bits(texa, 32, 8), bits(texa, 15, 1)};
@@ -1986,70 +2306,185 @@ void GsGpu::Impl::drawMap(const MinimapView& view, float left, float top, uint32
   c->PSSetShaderResources(0, 1, &none);
 }
 
-void GsGpu::present(const Gs::Display& d) {
+bool GsGpu::Impl::target(RECT& rc) {
+  if (!swapChain || !GetClientRect(hwnd, &rc) || rc.right <= 0 || rc.bottom <= 0) return false;
+  if (UINT(rc.right) != backW || UINT(rc.bottom) != backH || !backBuffer) {
+    backBuffer.Reset();
+    ctx->OMSetRenderTargets(0, nullptr, nullptr);
+    if (FAILED(swapChain->ResizeBuffers(0, UINT(rc.right), UINT(rc.bottom), DXGI_FORMAT_UNKNOWN,
+                                        refreshWait ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0)))
+      return false;
+    ComPtr<ID3D11Texture2D> back;
+    swapChain->GetBuffer(0, IID_PPV_ARGS(&back));
+    dev->CreateRenderTargetView(back.Get(), nullptr, &backBuffer);
+    backW = UINT(rc.right), backH = UINT(rc.bottom);
+  }
+  return true;
+}
+
+void GsGpu::present(const Gs::Display& d, uint64_t stamp) {
   Impl& m = *impl_;
   if (!m.swapChain || !m.makePicture(d, m.scale)) return;
-  RECT rc;
-  if (!GetClientRect(m.hwnd, &rc) || rc.right <= 0 || rc.bottom <= 0) return;
-  ID3D11DeviceContext* ctx = m.ctx.Get();
-  if (UINT(rc.right) != m.backW || UINT(rc.bottom) != m.backH || !m.backBuffer) {
-    m.backBuffer.Reset();
-    ctx->OMSetRenderTargets(0, nullptr, nullptr);
-    if (FAILED(m.swapChain->ResizeBuffers(0, UINT(rc.right), UINT(rc.bottom), DXGI_FORMAT_UNKNOWN, 0))) return;
-    ComPtr<ID3D11Texture2D> back;
-    m.swapChain->GetBuffer(0, IID_PPV_ARGS(&back));
-    m.dev->CreateRenderTargetView(back.Get(), nullptr, &m.backBuffer);
-    m.backW = UINT(rc.right), m.backH = UINT(rc.bottom);
+  const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  const double at = stamp ? double(stamp) * 1e-9 : now, gap = at - m.stampB;
+  if (gap > 0.005 && gap < 0.1) m.frameSeconds += (gap - m.frameSeconds) * 0.05;
+  if (m.presents++ % 60 == 0) {  // the screen's refresh rate, now and then (the window may have moved)
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (GetMonitorInfoW(MonitorFromWindow(m.hwnd, MONITOR_DEFAULTTONEAREST), &mi) && EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm) &&
+        dm.dmDisplayFrequency > 1)
+      m.refreshHz = dm.dmDisplayFrequency;
   }
+  const double gameHz = m.frameSeconds > 1 / 55.0 ? 50.0 : 59.94;  // PAL or NTSC
+  // Interpolation: on a screen at least half again as fast as the game, unless the game is
+  // outrunning real time (fast loading), when the pictures are shown as they come.
+  const bool interpolate = settings().interpolation && m.playing && m.refreshThread.joinable() && m.refreshHz >= gameHz * 1.5 && gap > 0.011 && m.generator();
+  m.fps = fpsText(interpolate ? m.refreshHz / gameHz : 1);
+  if (interpolate) {
+    m.view.wide = wideScreen();
+    const Impl::PictureDepth z = m.pictureDepth();
+    m.frameGen->push(m.picture.Get(), m.pictureW, m.pictureH, m.scale, m.view, z.depth, m.scale, z.scene);
+    m.stampA = m.stampB, m.stampB = at;
+    m.delays[m.presents % m.delays.size()] = now - at;  // the most of late over the last 2 seconds, at most most of a frame
+    m.lag = std::min(*std::max_element(m.delays.begin(), m.delays.end()), m.frameSeconds * 0.8);
+    m.interpolating = true;
+    return;
+  }
+  m.interpolating = false, m.ticked = false;
+  m.stampB = at;
+  if (m.frameGen) m.frameGen->forget();
+  RECT rc;
+  if (!m.target(rc)) return;
+  m.show(m.pictureSrv.Get(), rc);
+  m.swapChain->Present(0, 0);
+}
+
+void GsGpu::tick() {
+  Impl& m = *impl_;
+  std::unique_lock lock(m.callMutex, std::try_to_lock);
+  if (!lock || !m.interpolating || !m.frameGen || !m.frameGen->ready()) return;
+  RECT rc;
+  if (!m.target(rc)) return;
+  // The moment shown: a frame and the most a picture has been late behind now, so that the
+  // pictures on both sides of it are always here.
+  const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  const double moment = now - m.frameSeconds - m.lag - 0.001;
+  const double t = m.stampB > m.stampA ? std::clamp((moment - m.stampA) / (m.stampB - m.stampA), 0.0, 1.0) : 1.0;
+  const int aw = wideScreen() ? 16 : 4, ah = wideScreen() ? 9 : 3;  // made as large as show() shows it
+  int w = rc.right, h = rc.bottom;
+  if (w * ah > h * aw) w = h * aw / ah; else h = w * ah / aw;
+  ID3D11ShaderResourceView* made = m.frameGen->make(float(t), uint32_t(w), uint32_t(h));
+  if (!made) return;
+  m.show(made, rc);
+  m.swapChain->Present(1, 0);
+  m.ticked = true;
+}
+
+void GsGpu::setView(float yaw, float pitch, bool playing) {
+  impl_->playing = playing;
+  impl_->view.known = std::isfinite(yaw) && std::isfinite(pitch);
+  impl_->view.yaw = yaw, impl_->view.pitch = pitch;
+}
+
+void GsGpu::onRefresh(std::function<void()> wake) {
+  Impl& m = *impl_;
+  if (m.refreshThread.joinable()) {
+    m.refreshStop = true;
+    m.refreshThread.join();
+    m.refreshStop = false;
+  }
+  if (!wake || !m.refreshWait) return;
+  m.refreshThread = std::thread([&m, wake = std::move(wake)] {
+    while (!m.refreshStop)
+      if (const DWORD r = WaitForSingleObjectEx(m.refreshWait, 20, FALSE); m.interpolating && (r == WAIT_OBJECT_0 || (r == WAIT_TIMEOUT && !m.ticked)))
+        wake();  // (also when it times out before a first picture: the swap chain waits for one)
+  });
+}
+
+void GsGpu::Impl::show(ID3D11ShaderResourceView* srv, const RECT& rc) {
   // The PS2 picture is 4:3 (or 16:9, F10) whatever its size in pixels; it is centred with black bars.
   const int aw = wideScreen() ? 16 : 4, ah = wideScreen() ? 9 : 3;
   int w = rc.right, h = rc.bottom;
   if (w * ah > h * aw) w = h * aw / ah; else h = w * ah / aw;
   const float black[4] = {0, 0, 0, 1};
-  ctx->ClearRenderTargetView(m.backBuffer.Get(), black);
+  ctx->ClearRenderTargetView(backBuffer.Get(), black);
   const D3D11_VIEWPORT vp{float((rc.right - w) / 2), float((rc.bottom - h) / 2), float(w), float(h), 0, 1};
   ctx->RSSetViewports(1, &vp);
-  ctx->RSSetState(m.rasterizer.Get());
-  ctx->OMSetRenderTargets(1, m.backBuffer.GetAddressOf(), nullptr);
+  ctx->RSSetState(rasterizer.Get());
+  ctx->OMSetRenderTargets(1, backBuffer.GetAddressOf(), nullptr);
   ctx->IASetInputLayout(nullptr);
   ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  ctx->VSSetShader(m.presentVs.Get(), nullptr, 0);
-  ctx->PSSetShader(m.presentPs.Get(), nullptr, 0);
-  ctx->PSSetShaderResources(0, 1, m.pictureSrv.GetAddressOf());
+  ctx->VSSetShader(presentVs.Get(), nullptr, 0);
+  ctx->PSSetShader(presentPs.Get(), nullptr, 0);
+  ctx->PSSetShaderResources(0, 1, &srv);
   // Pixel for pixel at 1x as before; a larger picture is filtered down (or up) to the window.
-  ctx->PSSetSamplers(0, 1, (m.scale > 1 ? m.linearSampler : m.pointSampler).GetAddressOf());
+  ctx->PSSetSamplers(0, 1, (scale > 1 ? linearSampler : pointSampler).GetAddressOf());
   ctx->Draw(3, 0);
   ID3D11ShaderResourceView* none = nullptr;
   ctx->PSSetShaderResources(0, 1, &none);
   const D3D11_VIEWPORT whole{0, 0, float(rc.right), float(rc.bottom), 0, 1};
   ctx->RSSetViewports(1, &whole);
   const float pictureRight = vp.TopLeftX + vp.Width, cellHeight = float(std::max(2, int(rc.bottom) / 180));
-  if (const MinimapView view = minimapView(m.mapVertices, m.mapVersion); view.visible) {
+  if (const MinimapView view = minimapView(mapVertices, mapVersion); view.visible) {
     const uint32_t size = uint32_t(std::max(64.0f, float(h) * 0.26f));
     const float margin = float(h) * 0.02f;  // and below the counter, in the same corner
-    m.drawMap(view, pictureRight - float(size) - margin, vp.TopLeftY + std::max(margin, cellHeight * 8), size);
-    ctx->VSSetShader(m.presentVs.Get(), nullptr, 0);
+    drawMap(view, pictureRight - float(size) - margin, vp.TopLeftY + std::max(margin, cellHeight * 8), size);
+    ctx->VSSetShader(presentVs.Get(), nullptr, 0);
   }
-  if (const std::string text = fpsText(); !text.empty()) {  // the counter, in the window's top right corner
+  // A screenshot asked for (F12, --shot): the window as shown so far, without the counter.
+  if (std::filesystem::path file; takeScreenshotRequest(file)) {
+    ComPtr<ID3D11Texture2D> back, staging;
+    swapChain->GetBuffer(0, IID_PPV_ARGS(&back));
+    D3D11_TEXTURE2D_DESC td{};
+    back->GetDesc(&td);
+    td.Usage = D3D11_USAGE_STAGING, td.BindFlags = 0, td.CPUAccessFlags = D3D11_CPU_ACCESS_READ, td.MiscFlags = 0;
+    D3D11_MAPPED_SUBRESOURCE map;
+    if (SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &staging))) {
+      ctx->CopyResource(staging.Get(), back.Get());
+      if (SUCCEEDED(ctx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &map))) {
+        const bool saved = savePng(file, td.Width, td.Height, static_cast<const uint8_t*>(map.pData), map.RowPitch);
+        ctx->Unmap(staging.Get(), 0);
+        std::printf("screenshot %s: %s\n", saved ? "saved" : "NOT saved", file.string().c_str());
+      }
+    }
+  }
+  if (const std::string& text = fps; !text.empty()) {  // the counter, in the window's top right corner
     const float cell = float(std::max(2, int(rc.bottom) / 180));
     struct {
       float x, y, cell;
       uint32_t count, glyphs[8];
     } c{float(rc.right) - (float(text.size() * 4 + 2)) * cell, cell, cell, uint32_t(std::min<size_t>(text.size(), 8)), {}};
     for (size_t i = 0; i < c.count; ++i) c.glyphs[i] = fpsGlyph(text[i]);
-    m.setConstants(&c, sizeof(c));
-    ctx->PSSetShader(m.fpsPs.Get(), nullptr, 0);
-    ctx->PSSetConstantBuffers(0, 1, m.constants.GetAddressOf());
-    ctx->OMSetBlendState(m.overBlend.Get(), nullptr, 0xFFFFFFFF);
+    setConstants(&c, sizeof(c));
+    ctx->PSSetShader(fpsPs.Get(), nullptr, 0);
+    ctx->PSSetConstantBuffers(0, 1, constants.GetAddressOf());
+    ctx->OMSetBlendState(overBlend.Get(), nullptr, 0xFFFFFFFF);
     ctx->Draw(3, 0);
     ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
   }
   ctx->OMSetRenderTargets(0, nullptr, nullptr);
-  m.swapChain->Present(0, 0);
+  }
+
+FrameGen* GsGpu::Impl::generator() {
+  if (!frameGen && !frameGenFailed) {
+    frameGen = std::make_unique<FrameGen>();
+    std::string error;
+    if (!frameGen->init(dev.Get(), ctx.Get(), error)) {
+      std::printf("interpolation unavailable: %s\n", error.c_str());
+      frameGen.reset(), frameGenFailed = true;
+    }
+  }
+  return frameGen.get();
 }
+
+
+uint32_t GsGpu::scale() const { return impl_->scale; }
 
 void GsGpu::readMemory(std::vector<uint32_t>& words) {
   Impl& m = *impl_;
+  std::lock_guard lock(m.callMutex);
   m.memRead(Impl::Pages().set());
   D3D11_BUFFER_DESC bd;
   m.mem->GetDesc(&bd);
@@ -2065,10 +2500,27 @@ void GsGpu::readMemory(std::vector<uint32_t>& words) {
 
 uint32_t GsGpu::picture(const Gs::Display& d, std::vector<uint32_t>& rgba) {
   Impl& m = *impl_;
+  std::lock_guard lock(m.callMutex);
   static const bool scaled = std::getenv("CODPORT_DUMP_SCALED") != nullptr;
   const uint32_t scale = scaled ? m.scale : 1, w = d.width * scale, h = d.height * scale;
   rgba.assign(size_t(w) * h, 0);
   if (!m.makePicture(d, scale)) return scale;
+  // For testing interpolation: the picture halfway from the last one, as build/frames/mid-N.png.
+  if (static const bool mid = std::getenv("CODPORT_INTERP_DUMP") != nullptr; mid && m.generator()) {
+    m.view.wide = wideScreen();
+    const Impl::PictureDepth z = m.pictureDepth();
+    m.frameGen->push(m.picture.Get(), w, h, scale, m.view, z.depth, m.scale, z.scene);
+    if (ID3D11ShaderResourceView* made = m.frameGen->ready() ? m.frameGen->make(0.5f, w, h) : nullptr) {
+      ComPtr<ID3D11Resource> res;
+      made->GetResource(&res);
+      m.ctx->CopyResource(m.staging.Get(), res.Get());
+      D3D11_MAPPED_SUBRESOURCE map;
+      if (SUCCEEDED(m.ctx->Map(m.staging.Get(), 0, D3D11_MAP_READ, 0, &map))) {
+        savePng(iconFile().parent_path() / "frames" / std::format("mid-{:05}.png", m.frameNo), w, h, static_cast<const uint8_t*>(map.pData), map.RowPitch);
+        m.ctx->Unmap(m.staging.Get(), 0);
+      }
+    }
+  }
   m.ctx->CopyResource(m.staging.Get(), m.picture.Get());
   D3D11_MAPPED_SUBRESOURCE map;
   if (FAILED(m.ctx->Map(m.staging.Get(), 0, D3D11_MAP_READ, 0, &map))) return scale;

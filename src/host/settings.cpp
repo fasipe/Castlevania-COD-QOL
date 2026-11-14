@@ -146,9 +146,9 @@ Settings Settings::defaults() {
   // Keyboard and mouse, for a hand on W/A/S/D and the other on the mouse: W/A/S/D = left stick
   // (Hector moves with it), the mouse turns the camera (and I/J/K/L = right stick), left and right
   // buttons = square and circle (the attack and the final attack), Space = cross, E = triangle,
-  // F = R1 (guard), Q = L1, 1/2 = L2/R2, Shift = L3 (the sprint), Tab = SELECT (the map), Enter =
-  // START, arrows = D-pad (the Innocent Devil's AI, and menus).
-  s.keys = {VK_TAB, VK_SHIFT, 0,   VK_RETURN, VK_UP, VK_RIGHT, VK_DOWN, VK_LEFT, '1', '2', 'Q', 'F',
+  // F = R1 (guard), Q = L1, 1 = L2, middle button = R2 (lock on), Shift = L3 (the sprint), Tab =
+  // SELECT (the map), Enter = START, arrows = D-pad (the Innocent Devil's AI, and menus).
+  s.keys = {VK_TAB, VK_SHIFT, 0,   VK_RETURN, VK_UP, VK_RIGHT, VK_DOWN, VK_LEFT, '1', VK_MBUTTON, 'Q', 'F',
             'E',    VK_RBUTTON, VK_SPACE, VK_LBUTTON, 'W', 'S', 'A', 'D', 'I', 'K', 'J', 'L'};
   // Xbox layout onto the DualShock: A = cross, B = circle, X = square, Y = triangle.
   s.pad = {XINPUT_GAMEPAD_BACK,      XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_GAMEPAD_START,
@@ -186,6 +186,7 @@ void Settings::load(const std::filesystem::path& from) {
       if (key == "proporcao") wide = value == "16:9";
       if (key == "resolucao") scale = std::clamp(std::atoi(value.c_str()), 1, 4);
       if (key == "mostrar_fps") showFps = value == "1";
+      if (key == "interpolacao") interpolation = value == "1";
       if (key == "idioma" && (value == "pt" || value == "en")) language = value;
       continue;
     }
@@ -195,6 +196,8 @@ void Settings::load(const std::filesystem::path& from) {
       if (key == "filtro_textura") textureFilter = value == "1";
       if (key == "carregamento_rapido") fastLoading = value == "1";
       if (key == "minimapa") minimap = value == "1";
+      if (key == "pacote_texturas") texturePack = value == "1";
+      if (key == "salvar_texturas") dumpTextures = value == "1";
       continue;
     }
     if (section == "mouse") {
@@ -224,14 +227,20 @@ void Settings::save() const {
       << "\n# Tamanho da janela fora da tela cheia, em pixels (em tela cheia vale o do monitor)\ntamanho_janela=" << windowWidth << 'x'
       << windowHeight << "\nproporcao=" << (wide ? "16:9" : "4:3")
       << "\n# Resolucao do desenho: 1 = a do PS2; 2, 3 ou 4 = tantas vezes mais nitida (pesa mais na placa de\n"
-         "# video; vale ao abrir o jogo)\nresolucao="
+         "# video)\nresolucao="
       << scale << "\n# Quadros por segundo no canto superior direito (F9 liga e desliga)\nmostrar_fps=" << (showFps ? 1 : 0)
+      << "\n# Interpolação: quadros feitos entre os do jogo, em telas de 100 Hz ou mais (atrasa a imagem um pouco)\ninterpolacao="
+      << (interpolation ? 1 : 0)
       << "\n# Idioma das opcoes e controles (F1): pt ou en / Language of the options and controls (F1): pt or en\nidioma=" << language
-      << "\n\n[jogo]\n# Com um inimigo travado, os ataques viram para ele (vale ao abrir o jogo)\nataque_no_alvo=" << (attackTurn ? 1 : 0)
-      << "\n# L3 (apertar o analogico esquerdo) liga e desliga a corrida mais rapida (vale ao abrir o jogo)\ncorrida=" << (sprint ? 1 : 0)
-      << "\n# Texturas suavizadas como no PS2; 0 = pixels duros (vale ao abrir o jogo)\nfiltro_textura=" << (textureFilter ? 1 : 0)
+      << "\n\n[jogo]\n# Com um inimigo travado, os ataques viram para ele\nataque_no_alvo=" << (attackTurn ? 1 : 0)
+      << "\n# L3 (apertar o analogico esquerdo) liga e desliga a corrida mais rapida\ncorrida=" << (sprint ? 1 : 0)
+      << "\n# Texturas suavizadas como no PS2; 0 = pixels duros\nfiltro_textura=" << (textureFilter ? 1 : 0)
       << "\n# Portas e telas de Loading sem esperar o tempo real; a musica e o som da porta somem\ncarregamento_rapido=" << (fastLoading ? 1 : 0)
       << "\n# Mapa no canto da tela (F8 liga e desliga)\nminimapa=" << (minimap ? 1 : 0)
+      << "\n# Pacote de texturas: as imagens de textures\\replace no lugar das do jogo (vale ao abrir o jogo)\npacote_texturas="
+      << (texturePack ? 1 : 0)
+      << "\n# Salva as texturas do jogo em textures\\dump, para fazer um pacote (vale ao abrir o jogo)\nsalvar_texturas="
+      << (dumpTextures ? 1 : 0)
       << "\n\n[mouse]\n# O mouse gira a camera (o analogico direito); Esc solta o cursor, um clique na janela prende de novo\n"
          "camera_com_mouse=" << (mouseCamera ? 1 : 0)
       << "\n# De 1 a 10\nsensibilidade=" << mouseSensitivity

@@ -22,12 +22,13 @@ enum : int { kList = 100, kClear, kDefaults, kClose, kHint, kTabs };
 
 // The options page: a check box per setting, the resolution in a list.
 enum : int { kFullscreen = 200, kWide, kFilter, kFps, kMinimap, kFastLoading, kSprint, kAttackTurn, kMouseCamera, kInvertY,
-             kScale, kScaleLabel, kOptionsNote, kWindowSize, kSensitivity, kLanguage };
+             kScale, kScaleLabel, kOptionsNote, kWindowSize, kSensitivity, kLanguage, kInterpolation };
 bool* optionOf(int id) {
   Settings& s = settings();
   switch (id) {
     case kFilter: return &s.textureFilter;
     case kFps: return &s.showFps;
+    case kInterpolation: return &s.interpolation;
     case kMinimap: return &s.minimap;
     case kFastLoading: return &s.fastLoading;
     case kSprint: return &s.sprint;
@@ -203,11 +204,13 @@ void createOptions() {
   const Box image[] = {{kFullscreen, T(L"Tela cheia (também Alt+Enter ou F11)", L"Full screen (also Alt+Enter or F11)"), s.fullscreen},
                        {kWide, T(L"Imagem 16:9; desligada, 4:3 como no PS2 (também F10)", L"16:9 picture; off, 4:3 as on the PS2 (also F10)"), s.wide},
                        {kFilter, T(L"Texturas suavizadas, como o PS2 desenha", L"Smoothed textures, as the PS2 draws them"), s.textureFilter},
-                       {kFps, T(L"Quadros por segundo no canto (também F9)", L"Frames per second in the corner (also F9)"), s.showFps}};
+                       {kFps, T(L"Quadros por segundo no canto (também F9)", L"Frames per second in the corner (also F9)"), s.showFps},
+                       {kInterpolation, T(L"Interpolação: quadros entre os do jogo em telas de 100 Hz ou mais", L"Interpolation: frames between the game's on 100 Hz or faster screens"),
+                        s.interpolation}};
   const Box game[] = {{kMinimap, T(L"Minimapa no canto da tela (também F8)", L"Minimap in the corner of the screen (also F8)"), s.minimap},
                       {kFastLoading, T(L"Carregamento rápido nas portas (a música para durante ele)", L"Fast loading at doors (the music stops during it)"), s.fastLoading},
-                      {kSprint, T(L"Correr mais rápido com L3 (vale ao abrir o jogo)", L"Run faster with L3 (applies when the game starts)"), s.sprint},
-                      {kAttackTurn, T(L"Ataques viram para o inimigo travado (vale ao abrir o jogo)", L"Attacks turn to the locked-on enemy (applies when the game starts)"), s.attackTurn}};
+                      {kSprint, T(L"Correr mais rápido com L3", L"Run faster with L3"), s.sprint},
+                      {kAttackTurn, T(L"Ataques viram para o inimigo travado", L"Attacks turn to the locked-on enemy"), s.attackTurn}};
   int y = 52;
   d.optionsPage.push_back(child(L"STATIC", T(L"Imagem", L"Picture"), 0, -1, 28, y, 300, 20));
   d.optionsPage.push_back(child(L"STATIC", L"Idioma / Language:", 0, -1, 344, y, 120, 22));
@@ -235,12 +238,12 @@ void createOptions() {
   SendMessageW(sizeList, CB_SETCURSEL, WPARAM(std::find(d.sizes.begin(), d.sizes.end(), current) - d.sizes.begin()), 0);
   d.optionsPage.push_back(sizeList);
   y += 34;
-  d.optionsPage.push_back(child(L"STATIC", T(L"Resolução do desenho (vale ao abrir o jogo):", L"Drawing resolution (applies when the game starts):"), 0, kScaleLabel, 40, y + 4, 300, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"Resolução do desenho:", L"Drawing resolution:"), 0, kScaleLabel, 40, y + 4, 300, 22));
   HWND scale = child(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, kScale, 344, y, 220, 200);
   for (const wchar_t* option : {T(L"1x (a do PS2)", L"1x (the PS2's)"), L"2x", L"3x", L"4x"}) SendMessageW(scale, CB_ADDSTRING, 0, LPARAM(option));
   SendMessageW(scale, CB_SETCURSEL, WPARAM(std::clamp(s.scale, 1, 4) - 1), 0);
   d.optionsPage.push_back(scale);
-  y += 40;
+  y += 34;
   d.optionsPage.push_back(child(L"STATIC", T(L"Jogo", L"Game"), 0, -1, 28, y, 600, 20));
   y += 26;
   for (const Box& b : game) {
@@ -249,7 +252,7 @@ void createOptions() {
     d.optionsPage.push_back(c);
     y += 26;
   }
-  y += 14;
+  y += 6;
   d.optionsPage.push_back(child(L"STATIC", L"Mouse", 0, -1, 28, y, 600, 20));
   y += 26;
   HWND mouse = child(L"BUTTON", T(L"Câmera com o mouse (Esc solta o cursor, um clique na janela prende de novo)", L"Camera with the mouse (Esc lets the cursor go, a click in the window holds it again)"),
@@ -270,7 +273,7 @@ void createOptions() {
                       40, y, 600, 24);
   SendMessageW(invert, BM_SETCHECK, s.invertMouseY ? BST_CHECKED : BST_UNCHECKED, 0);
   d.optionsPage.push_back(invert);
-  d.optionsPage.push_back(child(L"STATIC", T(L"As mudanças são salvas na hora, no codport.ini.", L"Changes are saved at once, in codport.ini."), 0, kOptionsNote, 28, 528, 600, 22));
+  d.optionsPage.push_back(child(L"STATIC", T(L"As mudanças valem na hora e ficam salvas no codport.ini.", L"Changes apply at once and are saved in codport.ini."), 0, kOptionsNote, 28, 528, 600, 22));
 }
 
 void showPage(int page) {
@@ -337,7 +340,7 @@ void create(HWND wnd) {
   SendMessageW(d.hint, WM_SETFONT, WPARAM(d.font), TRUE);
   d.controlsPage = {d.list, d.hint, button(wnd, kClear, T(L"Limpar a ação", L"Clear action"), 12, 562, 120),
                     button(wnd, kDefaults, T(L"Restaurar padrão", L"Restore defaults"), 138, 562, 140)};
-  button(wnd, kClose, T(L"Fechar", L"Close"), 578, 562, 90);
+  button(wnd, kClose, T(L"Salvar", L"Save"), 578, 562, 90);
   createOptions();
   SendMessageW(d.tabs, TCM_SETCURSEL, WPARAM(gStartPage), 0);
   showPage(gStartPage);
@@ -352,7 +355,7 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
       return LRESULT(GetSysColorBrush(COLOR_WINDOW));
     case WM_COMMAND:
       if (gDialog->capturing && (LOWORD(wp) == kClear || LOWORD(wp) == kDefaults)) finishCapture(L"");
-      if (LOWORD(wp) >= kFullscreen && LOWORD(wp) <= kInvertY && HIWORD(wp) == BN_CLICKED)
+      if (((LOWORD(wp) >= kFullscreen && LOWORD(wp) <= kInvertY) || LOWORD(wp) == kInterpolation) && HIWORD(wp) == BN_CLICKED)
         return optionClicked(LOWORD(wp), SendMessageW(HWND(lp), BM_GETCHECK, 0, 0) == BST_CHECKED), 0;
       if (LOWORD(wp) == kWindowSize && HIWORD(wp) == CBN_SELCHANGE) {
         const size_t i = size_t(SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0));
@@ -375,6 +378,7 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
       if (LOWORD(wp) == kScale && HIWORD(wp) == CBN_SELCHANGE) {
         settings().scale = int(SendMessageW(HWND(lp), CB_GETCURSEL, 0, 0)) + 1;
         settings().save();
+        settingsChanged();  // the graphics card made again at it
         return 0;
       }
       switch (LOWORD(wp)) {
@@ -396,7 +400,11 @@ LRESULT CALLBACK proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
           setHint(T(L"Teclas e botões voltaram ao padrão.", L"Keys and buttons are back to the defaults."));
           break;
         }
-        case kClose: DestroyWindow(wnd); break;
+        case kClose:  // everything is in use already: written once more, and the window closes
+          settings().save();
+          settingsChanged();
+          DestroyWindow(wnd);
+          break;
       }
       return 0;
     case WM_NOTIFY: {

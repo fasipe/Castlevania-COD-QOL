@@ -82,6 +82,22 @@ bool Gs::useGpu(void* window, uint32_t scale, std::string& error) {
   return true;
 }
 
+bool Gs::setScale(void* window, uint32_t scale, std::string& error) {
+  if (!gpu_) return false;
+  flush();
+  flushSteps();
+  sync();
+  std::vector<uint32_t> words(mem.words(), mem.words() + GsMemory::kSize / 4);
+  gpu_->readMemory(words);
+  std::copy(words.begin(), words.end(), mem.words());
+  const uint32_t old = gpu_->scale();
+  gpu_.reset();  // its swap chain first: the window takes one at a time
+  if (useGpu(window, scale, error)) return true;
+  std::string again;
+  useGpu(window, old, again);
+  return false;
+}
+
 Gs::~Gs() {
   {
     std::lock_guard lock(mutex_);

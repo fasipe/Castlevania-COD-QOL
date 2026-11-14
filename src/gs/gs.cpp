@@ -371,11 +371,23 @@ void Gs::frameEnd() {
   if (gpu_) gpu_->frameEnd();
 }
 
-void Gs::queueFrame() {
+void Gs::onRefresh(std::function<void()> wake) {
+  if (gpu_) gpu_->onRefresh(std::move(wake));
+}
+
+void Gs::setView(float yaw, float pitch, bool playing) {
+  if (gpu_) gpu_->setView(yaw, pitch, playing);
+}
+
+void Gs::tick() {
+  if (gpu_) gpu_->tick();
+}
+
+void Gs::queueFrame(uint64_t stamp) {
   if (gpu_) {  // shown in the window by the GPU itself
     flush();
     Display d;
-    if (display(std::to_array(priv_), d)) gpu_->present(d);
+    if (display(std::to_array(priv_), d)) gpu_->present(d, stamp);
     return;
   }
   // Reads every frame buffer the display circuits may show.

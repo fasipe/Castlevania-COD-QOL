@@ -7,7 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
   add_compile_options(/W3 /utf-8 /permissive-)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-  add_compile_options(/arch:AVX2)
   add_link_options($<$<CONFIG:Release>:/LTCG:INCREMENTAL>)
 endif()
 
@@ -27,6 +26,9 @@ set(SOURCES
   src/gs/raster.cpp
   src/gs/graphics.cpp
   src/gs/gpu.cpp
+  src/gs/frame_gen.cpp
+  src/gs/shader_cache.cpp
+  src/gs/texture_pack.cpp
   src/gs/vif.cpp
   src/ipu/ipu.cpp
   src/host/window.cpp
@@ -47,6 +49,7 @@ set(SOURCES
   src/host/settings.cpp
   src/host/controls_dialog.cpp
   src/host/icon.cpp
+  src/host/screenshot.cpp
   src/game/attack_turn.cpp
   src/game/minimap.cpp
   src/game/mouse_camera.cpp
@@ -56,6 +59,8 @@ set(SOURCES
 )
 option(CODPORT_GAME_ONLY "Build only codport_game.dll, next to a codport.exe and codport.lib already built" OFF)
 if(NOT CODPORT_GAME_ONLY)
+# Built for any x64 processor (no /arch:AVX2: the same speed, measured; the CPU renderer's AVX2 code
+# runs only where the processor has it, and without it the graphics card must draw).
 add_executable(codport ${SOURCES} src/recomp/gamecode.cpp tools/setup/icon.rc)
 if(MSVC)
   # Debug information for the hand-written code (not the generated code: too large), so that
@@ -70,7 +75,7 @@ if(MSVC)
 endif()
 
 target_include_directories(codport PRIVATE src)
-target_link_libraries(codport PRIVATE user32 gdi32 comctl32 comdlg32 dbghelp winmm xinput d3d11 dxgi d3dcompiler)
+target_link_libraries(codport PRIVATE user32 gdi32 comctl32 comdlg32 dbghelp winmm xinput d3d11 dxgi d3dcompiler ole32 windowscodecs)
 # The game's code: codport_game.dll, built from the player's own disc (the recompiled functions in
 # recomp/gen and the VU micro programs in recomp/vu, written by `codport --recompile` and
 # `--vu-recompile`, see recompile.bat), loaded at start (src/recomp/gamecode.cpp). codport.exe
@@ -79,6 +84,10 @@ set_target_properties(codport PROPERTIES ENABLE_EXPORTS ON)
 
 # Setup.exe: opens the setup window (tools/setup/setup.ps1) as Setup.bat does, with an icon.
 add_executable(Setup WIN32 tools/setup/launcher.cpp tools/setup/icon.rc)
+# Texture Pack Mod.exe: the same for the texture pack installer (tools/setup/texture-pack-mod.ps1).
+add_executable(TexturePackMod WIN32 tools/setup/launcher.cpp tools/setup/icon.rc)
+target_compile_definitions(TexturePackMod PRIVATE TEXTURE_PACK_MOD)
+set_target_properties(TexturePackMod PROPERTIES OUTPUT_NAME "Texture Pack Mod")
 endif()
 
 # What the game runs from its start (recomp/gen/boot), built first so the game can start; then the

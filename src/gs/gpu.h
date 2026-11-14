@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,13 +33,23 @@ public:
   // Fills a new palette slot: `previous` with the entries the load replaces (see Gs::loadClut).
   uint32_t loadClut(uint32_t previous, uint32_t cbp, uint32_t clutPsm, uint32_t csm, uint32_t csa, bool t8,
                     uint64_t texclut, uint64_t texa);
-  void present(const Gs::Display& display);  // in the window, letterboxed (4:3, or 16:9 with F10)
+  // In the window, letterboxed (4:3, or 16:9 with F10); `stamp`: the VBlank's time (steady clock,
+  // ns), or 0. With interpolation the picture is shown by tick() instead.
+  void present(const Gs::Display& display, uint64_t stamp = 0);
+  // Interpolation: `wake` is called (from a thread of the GPU's) at each refresh of the screen
+  // while it is on, and tick() then shows the picture of that moment. Empty: stops.
+  void onRefresh(std::function<void()> wake);
+  void tick();
+  // Where the game's camera looks in the next picture (radians), or NaN: interpolation follows its
+  // turn; and whether the game is being played in it: menus, movies and the like are not interpolated.
+  void setView(float yaw, float pitch, bool playing);
   void frameEnd();  // the end of a frame's drawing (GPU time per frame with CODPORT_GPU_TIME set)
   double busySeconds() const;  // the graphics card's working time so far (frame by frame, with a window)
   // The displayed picture read back (RGBA, as Gs::frame gives it), at the GS's resolution, or with
   // CODPORT_DUMP_SCALED set at the drawing resolution; returns the scale it used.
   uint32_t picture(const Gs::Display& display, std::vector<uint32_t>& rgba);
-  void readMemory(std::vector<uint32_t>& words);  // GS memory read back (for debugging)
+  void readMemory(std::vector<uint32_t>& words);  // GS memory read back (for debugging, and a new scale)
+  uint32_t scale() const;
 
 private:
   struct Impl;

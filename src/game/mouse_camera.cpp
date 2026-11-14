@@ -4,6 +4,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 
 #include "ee/cpu.h"
 #include "game/hooks.h"
@@ -25,6 +26,8 @@ constexpr uint32_t kPitch = 0x1E0, kPosition = 0x1F0, kLookAt = 0x200, kGoal = 0
 Cpu::RecompFn gAfterInput = nullptr;
 float gYaw = 0, gPitch = 0;
 int gUntaken = 0;  // frames queued since the camera last took the turn (menus, movies: none)
+float gViewYaw = 0, gViewPitch = 0;
+bool gViewFresh = false;
 
 float readFloat(Cpu& c, uint32_t address) { return std::bit_cast<float>(c.mem.read<uint32_t>(address)); }
 void writeFloat(Cpu& c, uint32_t address, float v) { c.mem.write<uint32_t>(address, std::bit_cast<uint32_t>(v)); }
@@ -63,7 +66,18 @@ uint32_t afterInput(Cpu& c, uint32_t entry) {
     }
     gYaw = gPitch = 0;
   }
-  return gAfterInput(c, entry);
+  const uint32_t camera = uint32_t(c.s.gpr[17].ud[0]);
+  const uint32_t next = gAfterInput(c, entry);
+  if (camera) {  // the view after the update: from the camera to the point it looks at
+    float d[3];
+    for (int i = 0; i < 3; ++i) d[i] = readFloat(c, camera + kLookAt + 4 * i) - readFloat(c, camera + kPosition + 4 * i);
+    const float r = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (r > 1e-3f && std::isfinite(r)) {
+      gViewYaw = std::atan2(d[0], d[2]), gViewPitch = std::asin(std::clamp(d[1] / r, -1.0f, 1.0f));
+      gViewFresh = true;
+    }
+  }
+  return next;
 }
 }  // namespace
 
@@ -71,6 +85,11 @@ void installMouseCamera(Cpu& cpu) {
   Cpu::RecompFn& slot = recompSlot(cpu, kAfterInput);
   if (!slot) return;
   gAfterInput = slot, slot = afterInput;
+}
+
+bool cameraView(float& yaw, float& pitch) {
+  yaw = gViewYaw, pitch = gViewPitch;
+  return std::exchange(gViewFresh, false);
 }
 
 void queueCameraTurn(float yaw, float pitch) {

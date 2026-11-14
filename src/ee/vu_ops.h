@@ -20,12 +20,10 @@ inline const __m128i kDestMask[16] = {
 };
 inline constexpr uint8_t kReverse4[16] = {0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
 
-// clampf for four lanes.
+// clampf for four lanes: infinities to the largest finite value of their sign, everything else
+// (NaN patterns included: MINPS and MAXPS return their second operand when either is NaN) as it is.
 inline __m128 clampv(__m128 v) {
-  const __m128i b = _mm_castps_si128(v);
-  const __m128i infinite = _mm_cmpeq_epi32(_mm_and_si128(b, _mm_set1_epi32(0x7FFFFFFF)), _mm_set1_epi32(0x7F800000));
-  const __m128i saturated = _mm_or_si128(_mm_and_si128(b, _mm_set1_epi32(int(0x80000000u))), _mm_set1_epi32(0x7F7FFFFF));
-  return _mm_castsi128_ps(_mm_blendv_epi8(b, saturated, infinite));
+  return _mm_max_ps(_mm_set1_ps(-FLT_MAX), _mm_min_ps(_mm_set1_ps(FLT_MAX), v));
 }
 
 // VU floats have no infinities: overflowing results saturate to the largest finite value. Bit
@@ -45,13 +43,22 @@ inline uint32_t macFlags(__m128 v, __m128 mask) {
   const int sign = _mm_movemask_ps(_mm_and_ps(_mm_cmplt_ps(v, _mm_setzero_ps()), mask));
   return kReverse4[zero] | kReverse4[sign] << 4;
 }
+// The same with every lane enabled.
+inline uint32_t macFlagsAll(__m128 v) {
+  const int zero = _mm_movemask_ps(_mm_cmpeq_ps(v, _mm_setzero_ps()));
+  const int sign = _mm_movemask_ps(_mm_cmplt_ps(v, _mm_setzero_ps()));
+  return kReverse4[zero] | kReverse4[sign] << 4;
+}
+// Writes the lanes of `v` that a dest field enables (all four: a plain store, the usual case).
+__forceinline void storeLanes(float* d, __m128 v, uint32_t dest) {
+  if (dest == 0xF) _mm_storeu_ps(d, v);
+  else _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), v, _mm_castsi128_ps(kDestMask[dest])));
+}
 // Sets MAC and the status bits derived from it (zero/sign, and their sticky copies).
 inline void writeMac(uint32_t* vi, uint32_t mac) {
   vi[kVuMac] = mac;
-  uint32_t st = vi[kVuStatus] & ~0xFu;
-  if (mac & 0xF) st |= 1;
-  if (mac & 0xF0) st |= 2;
-  vi[kVuStatus] = st | ((st & 0xF) << 6);
+  const uint32_t zs = uint32_t((mac & 0xF) != 0) | uint32_t((mac & 0xF0) != 0) << 1;  // Z, S (U, O clear)
+  vi[kVuStatus] = (vi[kVuStatus] & ~0xFu) | zs | zs << 6;                              // and sticky copies
 }
 inline void setFlags(uint32_t* vi, __m128 v, __m128 mask) { writeMac(vi, macFlags(v, mask)); }
 inline uint32_t asBits(float f) { return std::bit_cast<uint32_t>(f); }
@@ -367,25 +374,25 @@ __forceinline void vuUpperK(VuRegs r, uint32_t op) {
 
 template <int O, int B, bool ToAcc>
 __forceinline __m128 VuMicro::upperArithStore(VuMicro& m, const Pair& p, __m128& mask) {
-  u128* vf = m.r_.vf;
+  u128* vf = m.vf_;
   const __m128 x = _mm_loadu_ps(vf[p.fs].f);
   __m128 y;
   if constexpr (B == kBc) y = _mm_set1_ps(vf[p.ft].f[p.bc]);
   else if constexpr (B == kFt) y = _mm_loadu_ps(vf[p.ft].f);
-  else if constexpr (B == kI) y = _mm_set1_ps(asFloat(m.r_.vi[kVuI]));
-  else y = _mm_set1_ps(asFloat(m.r_.vi[kVuQ]));
+  else if constexpr (B == kI) y = _mm_set1_ps(asFloat(m.vi_[kVuI]));
+  else y = _mm_set1_ps(asFloat(m.vi_[kVuQ]));
   __m128 res;
   if constexpr (O == kAdd) res = _mm_add_ps(x, y);
   else if constexpr (O == kSub) res = _mm_sub_ps(x, y);
   else if constexpr (O == kMul) res = _mm_mul_ps(x, y);
-  else if constexpr (O == kMadd) res = _mm_add_ps(_mm_loadu_ps(m.r_.acc->f), _mm_mul_ps(x, y));
-  else if constexpr (O == kMsub) res = _mm_sub_ps(_mm_loadu_ps(m.r_.acc->f), _mm_mul_ps(x, y));
+  else if constexpr (O == kMadd) res = _mm_add_ps(_mm_loadu_ps(m.acc_.f), _mm_mul_ps(x, y));
+  else if constexpr (O == kMsub) res = _mm_sub_ps(_mm_loadu_ps(m.acc_.f), _mm_mul_ps(x, y));
   else if constexpr (O == kMax) res = _mm_max_ps(y, x);  // operand order as std::max(x, y)
   else res = _mm_min_ps(y, x);
   const __m128 v = clampv(res);
   mask = _mm_castsi128_ps(kDestMask[p.dest]);
-  float* dst = ToAcc ? m.r_.acc->f : vf[p.fd].f;
-  if (ToAcc || p.fd) _mm_storeu_ps(dst, _mm_blendv_ps(_mm_loadu_ps(dst), v, mask));
+  float* dst = ToAcc ? m.acc_.f : vf[p.fd].f;
+  if (ToAcc || p.fd) storeLanes(dst, v, p.dest);
   return v;
 }
 
@@ -398,14 +405,14 @@ void VuMicro::upperArith(VuMicro& m, const Pair& p) {
 }
 
 template <int O, int B, bool ToAcc>
-uint32_t VuMicro::upperArithMac(VuMicro& m, const Pair& p) {
+__forceinline uint32_t VuMicro::upperArithMac(VuMicro& m, const Pair& p) {
   __m128 mask;
   const __m128 v = upperArithStore<O, B, ToAcc>(m, p, mask);
-  return macFlags(v, mask);
+  return p.dest == 0xF ? macFlagsAll(v) : macFlags(v, mask);
 }
 
 inline uint32_t VuMicro::upperGenericMac(VuMicro& m, const Pair& p) {
-  uint32_t* vi = m.r_.vi;
+  uint32_t* vi = m.vi_;
   const uint32_t mac = vi[kVuMac], status = vi[kVuStatus];
   if (!vuUpper(m.r_, p.hi)) m.fault = std::format("upper instruction 0x{:08X}", p.hi);
   const uint32_t result = vi[kVuMac];
@@ -414,7 +421,7 @@ inline uint32_t VuMicro::upperGenericMac(VuMicro& m, const Pair& p) {
 }
 
 __forceinline void VuMicro::upperGeneric(VuMicro& m, const Pair& p) {
-  uint32_t* vi = m.r_.vi;
+  uint32_t* vi = m.vi_;
   const uint32_t mac = vi[kVuMac], status = vi[kVuStatus];
   if (!vuUpper(m.r_, p.hi)) m.fault = std::format("upper instruction 0x{:08X}", p.hi);
   if (upperSetsFlags(p.hi)) {  // its flags arrive later like everyone's
@@ -428,7 +435,7 @@ __forceinline void VuMicro::upperGeneric(VuMicro& m, const Pair& p) {
 // reads in between see the older values, which pipelined programs count on.
 inline void VuMicro::delayFlags(uint32_t mac) {
   PendingFlags& f = pendingFlags_[cycle_ & 3];
-  if (f.valid) writeMac(r_.vi, f.mac);  // only reachable if the program ended and restarted
+  if (f.valid) writeMac(vi_, f.mac);  // only reachable if the program ended and restarted
   f = {cycle_ + kFlagLatency, mac, true};
 }
 
@@ -436,24 +443,24 @@ inline void VuMicro::delayFlags(uint32_t mac) {
 inline void VuMicro::settleDue() {
   PendingFlags& f = pendingFlags_[cycle_ & 3];
   if (f.valid && f.at <= cycle_) {
-    writeMac(r_.vi, f.mac);
+    writeMac(vi_, f.mac);
     f.valid = false;
   }
 }
 
-inline void VuMicro::settleAt(uint64_t cycle) {
+__forceinline void VuMicro::settleAt(uint64_t cycle) {
   PendingFlags& f = pendingFlags_[cycle & 3];
   if (f.valid && f.at <= cycle) {
-    writeMac(r_.vi, f.mac);
+    writeMac(vi_, f.mac);
     f.valid = false;
   }
 }
 
-inline void VuMicro::settleUpTo(uint64_t cycle) {
+__forceinline void VuMicro::settleUpTo(uint64_t cycle) {
   for (int k = 0; k < 4; ++k) {  // oldest first
     PendingFlags& f = pendingFlags_[(cycle + uint64_t(k)) & 3];
     if (f.valid && f.at <= cycle) {
-      writeMac(r_.vi, f.mac);
+      writeMac(vi_, f.mac);
       f.valid = false;
     }
   }
@@ -464,101 +471,101 @@ inline void VuMicro::settleFlags(bool all) {
     // Oldest first, so the latest result wins.
     PendingFlags& f = pendingFlags_[(cycle_ + uint64_t(k)) & 3];
     if (f.valid && (all || f.at <= cycle_)) {
-      writeMac(r_.vi, f.mac);
+      writeMac(vi_, f.mac);
       f.valid = false;
     }
   }
 }
 
 __forceinline void VuMicro::lowerLq(VuMicro& m, const Pair& p, uint32_t) {
-  const uint8_t* q = m.data_ + ((m.r_.vi[p.is] + p.imm) & (m.dataBytes_ / 16 - 1)) * 16;
-  u128& d = m.r_.vf[p.lft];
-  _mm_storeu_ps(d.f, _mm_blendv_ps(_mm_loadu_ps(d.f), _mm_loadu_ps(reinterpret_cast<const float*>(q)), _mm_castsi128_ps(kDestMask[p.ldest])));
+  const uint8_t* q = m.data_ + ((m.vi_[p.is] + p.imm) & (m.dataBytes_ / 16 - 1)) * 16;
+  u128& d = m.vf_[p.lft];
+  storeLanes(d.f, _mm_loadu_ps(reinterpret_cast<const float*>(q)), p.ldest);
 }
 __forceinline void VuMicro::lowerSq(VuMicro& m, const Pair& p, uint32_t) {
-  uint8_t* q = m.data_ + ((m.r_.vi[p.it] + p.imm) & (m.dataBytes_ / 16 - 1)) * 16;
+  uint8_t* q = m.data_ + ((m.vi_[p.it] + p.imm) & (m.dataBytes_ / 16 - 1)) * 16;
   float* d = reinterpret_cast<float*>(q);
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), _mm_loadu_ps(m.r_.vf[p.lfs].f), _mm_castsi128_ps(kDestMask[p.ldest])));
+  storeLanes(d, _mm_loadu_ps(m.vf_[p.lfs].f), p.ldest);
 }
 __forceinline void VuMicro::lowerLqi(VuMicro& m, const Pair& p, uint32_t) {
-  uint32_t* vi = m.r_.vi;
+  uint32_t* vi = m.vi_;
   const uint8_t* q = m.data_ + (vi[p.is] & (m.dataBytes_ / 16 - 1)) * 16;
-  u128& d = m.r_.vf[p.lft];
-  _mm_storeu_ps(d.f, _mm_blendv_ps(_mm_loadu_ps(d.f), _mm_loadu_ps(reinterpret_cast<const float*>(q)), _mm_castsi128_ps(kDestMask[p.ldest])));
+  u128& d = m.vf_[p.lft];
+  storeLanes(d.f, _mm_loadu_ps(reinterpret_cast<const float*>(q)), p.ldest);
   if (p.is) vi[p.is] = (vi[p.is] + 1) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerSqi(VuMicro& m, const Pair& p, uint32_t) {
-  uint32_t* vi = m.r_.vi;
+  uint32_t* vi = m.vi_;
   float* d = reinterpret_cast<float*>(m.data_ + (vi[p.it] & (m.dataBytes_ / 16 - 1)) * 16);
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), _mm_loadu_ps(m.r_.vf[p.lfs].f), _mm_castsi128_ps(kDestMask[p.ldest])));
+  storeLanes(d, _mm_loadu_ps(m.vf_[p.lfs].f), p.ldest);
   if (p.it) vi[p.it] = (vi[p.it] + 1) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerIaddiu(VuMicro& m, const Pair& p, uint32_t) {
-  if (p.it) m.r_.vi[p.it] = (m.r_.vi[p.is] + p.imm) & 0xFFFF;
+  if (p.it) m.vi_[p.it] = (m.vi_[p.is] + p.imm) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerIsubiu(VuMicro& m, const Pair& p, uint32_t) {
-  if (p.it) m.r_.vi[p.it] = (m.r_.vi[p.is] - p.imm) & 0xFFFF;
+  if (p.it) m.vi_[p.it] = (m.vi_[p.is] - p.imm) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerIadd(VuMicro& m, const Pair& p, uint32_t) {
   const uint32_t id = (p.lo >> 6) & 15;
-  if (id) m.r_.vi[id] = (m.r_.vi[p.is] + m.r_.vi[p.it]) & 0xFFFF;
+  if (id) m.vi_[id] = (m.vi_[p.is] + m.vi_[p.it]) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerIaddi(VuMicro& m, const Pair& p, uint32_t) {
-  if (p.it) m.r_.vi[p.it] = (m.r_.vi[p.is] + p.imm) & 0xFFFF;
+  if (p.it) m.vi_[p.it] = (m.vi_[p.is] + p.imm) & 0xFFFF;
 }
 __forceinline void VuMicro::lowerMove(VuMicro& m, const Pair& p, uint32_t) {
-  u128& d = m.r_.vf[p.lft];
-  _mm_storeu_ps(d.f, _mm_blendv_ps(_mm_loadu_ps(d.f), _mm_loadu_ps(m.r_.vf[p.lfs].f), _mm_castsi128_ps(kDestMask[p.ldest])));
+  u128& d = m.vf_[p.lft];
+  storeLanes(d.f, _mm_loadu_ps(m.vf_[p.lfs].f), p.ldest);
 }
 
 template <int Scale>
 void VuMicro::upperFtoi(VuMicro& m, const Pair& p) {  // float to fixed point (4, 12, 15 fraction bits)
   if (!p.ft) return;
-  const __m128 x = _mm_mul_ps(_mm_loadu_ps(m.r_.vf[p.fs].f), _mm_set1_ps(float(1 << Scale)));
+  const __m128 x = _mm_mul_ps(_mm_loadu_ps(m.vf_[p.fs].f), _mm_set1_ps(float(1 << Scale)));
   __m128i v = _mm_cvttps_epi32(x);  // INT_MIN when out of range (and for top-exponent patterns)
   v = _mm_blendv_epi8(v, _mm_set1_epi32(INT32_MAX), _mm_castps_si128(_mm_cmpge_ps(x, _mm_set1_ps(2147483648.0f))));
-  float* d = m.r_.vf[p.ft].f;
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), _mm_castsi128_ps(v), _mm_castsi128_ps(kDestMask[p.dest])));
+  float* d = m.vf_[p.ft].f;
+  storeLanes(d, _mm_castsi128_ps(v), p.dest);
 }
 
 template <int Scale>
 void VuMicro::upperItof(VuMicro& m, const Pair& p) {  // fixed point to float
   if (!p.ft) return;
-  const __m128 x = _mm_mul_ps(_mm_cvtepi32_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(m.r_.vf[p.fs].f))),
+  const __m128 x = _mm_mul_ps(_mm_cvtepi32_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(m.vf_[p.fs].f))),
                               _mm_set1_ps(1.0f / float(1 << Scale)));
-  float* d = m.r_.vf[p.ft].f;
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), x, _mm_castsi128_ps(kDestMask[p.dest])));
+  float* d = m.vf_[p.ft].f;
+  storeLanes(d, x, p.dest);
 }
 
 __forceinline void VuMicro::upperClip(VuMicro& m, const Pair& p) {  // CLIPw.xyz: 6 judgement bits, the last four kept
-  const float w = std::fabs(m.r_.vf[p.ft].f[3]);
-  const __m128 x = _mm_loadu_ps(m.r_.vf[p.fs].f);
+  const float w = std::fabs(m.vf_[p.ft].f[3]);
+  const __m128 x = _mm_loadu_ps(m.vf_[p.fs].f);
   const int above = _mm_movemask_ps(_mm_cmpgt_ps(x, _mm_set1_ps(w))), below = _mm_movemask_ps(_mm_cmplt_ps(x, _mm_set1_ps(-w)));
   const uint32_t b = (above & 1) | (below & 1) << 1 | (above & 2) << 1 | (below & 2) << 2 | (above & 4) << 2 | (below & 4) << 3;
-  uint32_t& clip = m.r_.vi[kVuClip];
+  uint32_t& clip = m.vi_[kVuClip];
   clip = ((clip << 6) | b) & 0xFFFFFF;
 }
 
 __forceinline void VuMicro::upperAbs(VuMicro& m, const Pair& p) {
-  const __m128 v = clampv(_mm_andnot_ps(_mm_set1_ps(-0.0f), _mm_loadu_ps(m.r_.vf[p.fs].f)));
+  const __m128 v = clampv(_mm_andnot_ps(_mm_set1_ps(-0.0f), _mm_loadu_ps(m.vf_[p.fs].f)));
   if (!p.ft) return;
-  float* d = m.r_.vf[p.ft].f;
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), v, _mm_castsi128_ps(kDestMask[p.dest])));
+  float* d = m.vf_[p.ft].f;
+  storeLanes(d, v, p.dest);
 }
 
 __forceinline void VuMicro::lowerBranch(VuMicro& m, const Pair& p, uint32_t pc) {
-  const uint32_t* vi = m.r_.vi;
+  const uint32_t* vi = m.vi_;
   const uint32_t target = pc + 8 + uint32_t(p.imm) * 8;
   switch (p.lo >> 25) {
     case 0x20: m.branchTo(target); return;  // B
     case 0x21:                             // BAL
-      if (p.it) m.r_.vi[p.it] = ((pc + 16) / 8) & 0xFFFF;
+      if (p.it) m.vi_[p.it] = ((pc + 16) / 8) & 0xFFFF;
       m.branchTo(target);
       return;
     case 0x24: m.branchTo((vi[p.is] & 0xFFFF) * 8); return;  // JR
     case 0x25: {                                             // JALR
       const uint32_t to = (vi[p.is] & 0xFFFF) * 8;
-      if (p.it) m.r_.vi[p.it] = ((pc + 16) / 8) & 0xFFFF;
+      if (p.it) m.vi_[p.it] = ((pc + 16) / 8) & 0xFFFF;
       m.branchTo(to);
       return;
     }
@@ -573,7 +580,7 @@ __forceinline void VuMicro::lowerBranch(VuMicro& m, const Pair& p, uint32_t pc) 
 
 // Integer and flag instructions of the first decode table (as in lower()).
 __forceinline void VuMicro::lowerInteger(VuMicro& m, const Pair& p, uint32_t) {
-  uint32_t* vi = m.r_.vi;
+  uint32_t* vi = m.vi_;
   const uint32_t lo = p.lo;
   auto setI = [&](uint32_t reg, uint32_t v) {
     if (reg) vi[reg] = v & 0xFFFF;
@@ -598,6 +605,14 @@ __forceinline void VuMicro::lowerInteger(VuMicro& m, const Pair& p, uint32_t) {
     case 0x11: vi[kVuClip] = lo & 0xFFFFFF; return;                                  // FCSET
     case 0x12: vi[1] = (vi[kVuClip] & lo & 0xFFFFFF) != 0; return;                   // FCAND
     case 0x13: vi[1] = ((vi[kVuClip] | lo) & 0xFFFFFF) == 0xFFFFFF; return;          // FCOR
+    case 0x14: case 0x15: case 0x16: case 0x17: {  // FSEQ, FSSET, FSAND, FSOR
+      const uint32_t imm12 = ((lo >> 10) & 0x800) | (lo & 0x7FF), st = vi[kVuStatus] & 0xFFF;
+      if ((lo >> 25) == 0x14) setI(p.it, st == imm12);
+      else if ((lo >> 25) == 0x15) vi[kVuStatus] = (vi[kVuStatus] & 0x3F) | (imm12 & 0xFC0);
+      else if ((lo >> 25) == 0x16) setI(p.it, st & imm12);
+      else setI(p.it, (st | imm12) == 0xFFF);
+      return;
+    }
     case 0x18: setI(p.it, (vi[kVuMac] & 0xFFFF) == (vi[p.is] & 0xFFFF)); return;     // FMEQ
     case 0x1A: setI(p.it, vi[kVuMac] & vi[p.is]); return;                             // FMAND
     case 0x1B: setI(p.it, (vi[kVuMac] | vi[p.is]) == 0xFFFF); return;                 // FMOR
@@ -612,22 +627,42 @@ __forceinline void VuMicro::lowerInteger(VuMicro& m, const Pair& p, uint32_t) {
 }
 
 __forceinline void VuMicro::lowerMfir(VuMicro& m, const Pair& p, uint32_t) {
-  const int32_t v = int16_t(m.r_.vi[p.is]);
-  float* d = m.r_.vf[p.lft].f;
-  _mm_storeu_ps(d, _mm_blendv_ps(_mm_loadu_ps(d), _mm_castsi128_ps(_mm_set1_epi32(v)), _mm_castsi128_ps(kDestMask[p.ldest])));
+  const int32_t v = int16_t(m.vi_[p.is]);
+  float* d = m.vf_[p.lft].f;
+  storeLanes(d, _mm_castsi128_ps(_mm_set1_epi32(v)), p.ldest);
 }
 
 __forceinline void VuMicro::lowerMtir(VuMicro& m, const Pair& p, uint32_t) {
-  if (p.it) m.r_.vi[p.it] = m.r_.vf[p.lfs].uw[(p.lo >> 21) & 3] & 0xFFFF;
+  if (p.it) m.vi_[p.it] = m.vf_[p.lfs].uw[(p.lo >> 21) & 3] & 0xFFFF;
 }
 
-inline void VuMicro::lowerDiv(VuMicro& m, const Pair& p, uint32_t) {  // DIV / SQRT / RSQRT: Q arrives later
-  vuLowerCommon(m.r_, p.lo, m.data_, m.dataBytes_ / 16, &m.pendingQ_);
-  m.qDelay_ = qLatency(p.lo);
+__forceinline void VuMicro::lowerDiv(VuMicro& m, const Pair& p, uint32_t) {  // DIV / SQRT / RSQRT: Q arrives later
+  const uint32_t fn2 = ((p.lo >> 4) & 0x7C) | (p.lo & 3);
+  const float s = m.vf_[p.lfs].f[(p.lo >> 21) & 3], t = m.vf_[p.lft].f[(p.lo >> 23) & 3];
+  if (fn2 == 0x38) m.pendingQ_ = divide(s, t);
+  else if (fn2 == 0x39) m.pendingQ_ = asBits(std::sqrt(std::fabs(t)));
+  else m.pendingQ_ = divide(s, std::sqrt(std::fabs(t)));
+  m.qDelay_ = fn2 == 0x3A ? 13 : 7;  // qLatency
+}
+
+__forceinline void VuMicro::lowerMr32(VuMicro& m, const Pair& p, uint32_t) {  // lanes rotated: x from y ... w from x
+  const __m128 s = _mm_loadu_ps(m.vf_[p.lfs].f);
+  storeLanes(m.vf_[p.lft].f, _mm_shuffle_ps(s, s, _MM_SHUFFLE(0, 3, 2, 1)), p.ldest);
+}
+
+__forceinline void VuMicro::lowerRnext(VuMicro& m, const Pair& p, uint32_t) {
+  uint32_t rr = m.vi_[kVuR];
+  rr = (rr << 1) ^ ((rr >> 4) & 1) ^ ((rr >> 22) & 1);
+  m.vi_[kVuR] = rr = (rr & 0x7FFFFF) | 0x3F800000;
+  if (p.lft) storeLanes(m.vf_[p.lft].f, _mm_castsi128_ps(_mm_set1_epi32(int(rr))), p.ldest);
+}
+
+__forceinline void VuMicro::lowerMfp(VuMicro& m, const Pair& p, uint32_t) {
+  if (p.lft) storeLanes(m.vf_[p.lft].f, _mm_castsi128_ps(_mm_set1_epi32(int(m.p_))), p.ldest);
 }
 
 inline void VuMicro::lowerXgkick(VuMicro& m, const Pair& p, uint32_t) {
-  if (m.xgkick) m.xgkick(m.r_.vi[p.is] & 0xFFFF);
+  if (m.xgkick) m.xgkick(m.vi_[p.is] & 0xFFFF);
 }
 
 // Start of every pair: counters, flag results arriving, Q and P results arriving.
@@ -635,7 +670,7 @@ inline void VuMicro::pairStart() {
   ++instructions;
   ++cycle_;
   settleDue();
-  if (qDelay_ > 0 && --qDelay_ == 0) r_.vi[kVuQ] = pendingQ_;
+  if (qDelay_ > 0 && --qDelay_ == 0) vi_[kVuQ] = pendingQ_;
   if (pDelay_ > 0 && --pDelay_ == 0) p_ = pendingP_;
 }
 
@@ -643,7 +678,7 @@ inline void VuMicro::pairStart() {
 inline void VuMicro::pairStall(bool waitQ, bool waitP) {
   if (!((waitQ && qDelay_ > 0) || (waitP && pDelay_ > 0))) return;
   const int stall = std::max(waitQ ? qDelay_ : 0, waitP ? pDelay_ : 0);
-  if (qDelay_ > 0 && (waitQ || qDelay_ <= stall)) r_.vi[kVuQ] = pendingQ_, qDelay_ = 0;
+  if (qDelay_ > 0 && (waitQ || qDelay_ <= stall)) vi_[kVuQ] = pendingQ_, qDelay_ = 0;
   else if (qDelay_ > 0) qDelay_ -= stall;
   if (pDelay_ > 0 && (waitP || pDelay_ <= stall)) p_ = pendingP_, pDelay_ = 0;
   else if (pDelay_ > 0) pDelay_ -= stall;

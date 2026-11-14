@@ -32,6 +32,7 @@ The port is made with the help of AI (Anthropic's Claude). Every change is teste
 - **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off. It is in English or Portuguese, chosen in the window itself (by default, the language of Windows).
 - **Any screen size** - full screen at the monitor's own resolution, or a window sized for 1080p, 1440p, 4K or ultrawide screens, the picture kept in proportion with black bars.
 - **Keyboard and Xbox controller** - XInput controllers work out of the box, and an optional frame counter shows performance (**F9**).
+- **Interpolation (optional)** - on screens of 100 Hz or more, a picture is made for every refresh of the screen between the game's own, from the motion between them, so the game shows at 120, 144 or 240 frames per second. It is off by default (**F1**): it shows the game about one frame later, and fast-changing moments (explosions, scene cuts) can show small flaws.
 - **Keyboard and mouse** - W/A/S/D move Hector, the mouse turns the camera directly (no lag, its sensitivity and an inverted vertical axis in **F1**), and its left and right buttons attack. A click in the window holds the cursor there; **Esc** lets it go.
 
 ## Required Game Version
@@ -51,7 +52,8 @@ Make an ISO image of your disc with any disc imaging tool. The image is only eve
 
 ### To Play
 
-- Windows 10 or 11, 64-bit.
+- Windows 10 or 11, 64-bit; or Linux and the Steam Deck through Proton (see [Linux and Steam Deck](#linux-and-steam-deck-untested), untested).
+- Any 64-bit processor from 2008 on (with SSE4.1); AVX2 is not needed.
 - A Direct3D 11 graphics card that supports rasterizer ordered views and double precision in shaders (developed on a GeForce GTX 1060). Without them the game draws on the processor, much more slowly.
 
 ### To Build
@@ -86,6 +88,24 @@ Both parts are compiled with full optimization, and the same code results as bui
 3. Run `recompile.bat`. It reads the game's executable from your ISO, translates the functions listed in `tools/recomp/functions.txt` to C++ (in `recomp/gen`, the ones listed in `tools/recomp/hot-functions.txt` apart from the others), compiles the VU1 micro programs listed in `tools/recomp/vu-blocks.idx` (in `recomp/vu`), and builds the four parts of the game's code from them (`codport_game.dll`, `codport_game_vu.dll`, `codport_game_hot.dll`, `codport_game_cold.dll`; what goes first is listed in `tools/recomp/boot-functions.txt`). It writes about 100 MB of code, which must not be shared.
 4. Run `build\codport.exe`. Started from a terminal, its messages show there.
 
+### Linux and Steam Deck (untested)
+
+The port is a Windows program, and on Linux it runs through Proton, as Steam runs Windows games. This has not been tried on a Steam Deck yet: it is written from how Proton, DXVK and the Deck's graphics driver work, and its compile step was tested on Windows with the same tools. Reports in [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) are welcome, working or not.
+
+`Setup.exe` and `Texture Pack Mod.exe` need Windows' PowerShell and Visual Studio, which Proton does not have, so on Linux the setup is `Setup-Linux.sh`:
+
+1. On the Deck, switch to **Desktop Mode**. Steam must have a Proton installed (any Windows game played once installs one; or install **Proton Experimental** from the library). About 5 GB must be free.
+2. Extract the release zip whole, for example into `~/Games/Castlevania-COD`, and put your ISO anywhere.
+3. Open a terminal there (Konsole: right click in the folder, **Open Terminal Here**) and run `sh Setup-Linux.sh`. It asks for the ISO (or give its path after the command) and then:
+   - downloads LLVM's `clang-cl` and `lld-link` once (about 2 GB, of which some 300 MB are kept), which build Windows programs natively on Linux;
+   - runs `xwin`, which downloads Microsoft's C++ runtime and Windows SDK from Microsoft: it shows Microsoft's license and asks you to type `yes`;
+   - translates the game from your disc with `build/codport.exe`, run through Proton;
+   - compiles the four parts of the game's code, as `Setup.exe` does, using every core (several minutes on the Deck). It can be stopped and run again: it goes on where it was.
+4. In Steam: **Games > Add a Non-Steam Game to My Library**, browse to `build/codport.exe` and add it. In its **Properties > Compatibility**, tick **Force the use of a specific Steam Play compatibility tool** and pick **Proton Experimental** (or Proton 9 or newer).
+5. Play it from Steam, also in Game Mode. The Deck's controls reach the game as an Xbox controller.
+
+Notes for the Deck: the graphics card path needs rasterizer ordered views, which Proton (DXVK) offers on the Deck's driver from Mesa 23.2 on (current SteamOS has it); without them the game draws on the processor, too slowly to play. The shaders come compiled in `build/shaders.bin`, so Proton's HLSL compiler is not needed. 1x or 2x resolution suits the Deck's screen; on the 90 Hz screen of the OLED model the interpolation can be turned on in **F1** (Steam + X opens the keyboard). Texture packs are installed by hand: their PNG files go in `textures/replace`.
+
 ## Controls
 
 ### Keyboard and Mouse
@@ -99,7 +119,7 @@ Both parts are compiled with full optimization, and the same code results as bui
 | Jump / Confirm | Space |
 | Innocent Devil ability / Back | E |
 | Guard | F |
-| Lock on | 2 |
+| Lock on | Middle mouse button (wheel click) |
 | Change target | 1 |
 | Reset camera | Q |
 | Sprint | Shift |
@@ -124,9 +144,18 @@ Both parts are compiled with full optimization, and the same code results as bui
 
 ## Settings
 
-Everything in the **F1** window is saved at once in `codport.ini`, next to the `memcard` folder, which is created the first time the game starts and can also be edited by hand. Full screen, widescreen, texture filtering, the frame counter, the minimap, fast loading and the mouse change at once; the internal resolution, the sprint and the attack turn apply the next time the game starts.
+Everything in the **F1** window is saved at once in `codport.ini`, next to the `memcard` folder, which is created the first time the game starts and can also be edited by hand. Every option changes at once, the internal resolution included, with no need to start the game again; **Save** closes the window.
 
 Saves go to the `memcard` folder. Each session is also recorded in `build/recordings` (inputs, clock and a copy of the memory card) and plays back exactly with `codport --replay <file>`; this is meant for testing, and the folder can be deleted.
+
+## Texture Packs
+
+The port can use new textures in place of the game's, at any resolution.
+
+- **To make a pack:** set `salvar_texturas=1` in `codport.ini` and play. Each texture the game shows is saved once in `textures\dump`, as a PNG named by a hash of its contents (alpha is saved so that 255 is opaque). Edit or upscale them, keeping the names.
+- **To use a pack:** open `Texture Pack Mod.exe` (next to `Setup.exe`) and choose the pack's `.zip` or folder, or drag it onto the window. Before installing, it says how many textures the pack replaces and which of them other packs installed already replace; packs can be removed there too. Where two packs replace the same texture, the one installed last is used. By hand, the PNG files go in `textures\replace` (subfolders are fine). With `pacote_texturas=1`, the default, the port loads them when the game starts and draws them in place of the game's.
+
+Only textures the game loads from the disc can be replaced, not pictures it draws itself (glows, the minimap), and only those it draws smoothed, which is nearly all of the 3D world. Packs made from your own disc are yours; do not share the dumped textures as they are, since they are the game's.
 
 ## Port Notes
 
@@ -144,7 +173,7 @@ Saves go to the `memcard` folder. Each session is also recorded in `build/record
 ## Known Issues
 
 - Only the European version (`SLES-53755`) works.
-- Windows only.
+- Windows only, apart from Linux and the Steam Deck through Proton, untested.
 - Fast loading skips the sound of those moments: the music pauses and the door's sound is not heard. It can be turned off in **F1**.
 - During the sprint the feet can slide slightly on the ground, since the strides are longer than the game's animation.
 - Ultrawide screens show the 16:9 picture with black bars at the sides.
@@ -201,6 +230,7 @@ O port é feito com a ajuda de IA (o Claude, da Anthropic). Cada alteração é 
 - **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada. Ela fica em português ou inglês, escolhido na própria janela (por padrão, o idioma do Windows).
 - **Qualquer tamanho de tela** - tela cheia na resolução do próprio monitor, ou janela em tamanhos para telas 1080p, 1440p, 4K ou ultrawide, com a imagem mantida na proporção por barras pretas.
 - **Teclado e controle Xbox** - controles XInput funcionam direto, e um contador de quadros opcional mostra o desempenho (**F9**).
+- **Interpolação (opcional)** - em telas de 100 Hz ou mais, uma imagem é feita para cada atualização da tela entre as do jogo, a partir do movimento entre elas, e o jogo aparece a 120, 144 ou 240 quadros por segundo. Vem desligada (**F1**): mostra o jogo cerca de um quadro depois, e momentos que mudam muito rápido (explosões, cortes de cena) podem ter pequenas falhas.
 - **Teclado e mouse** - W/A/S/D movem o Hector, o mouse gira a câmera direto (sem atraso, com sensibilidade e vertical invertido no **F1**) e seus botões esquerdo e direito atacam. Um clique na janela prende o cursor nela; o **Esc** solta.
 
 ## Versão Necessária do Jogo
@@ -220,7 +250,8 @@ Faça uma imagem ISO do seu disco com qualquer programa de imagem de disco. A im
 
 ### Para Jogar
 
-- Windows 10 ou 11, 64 bits.
+- Windows 10 ou 11, 64 bits; ou Linux e Steam Deck pelo Proton (veja [Linux e Steam Deck](#linux-e-steam-deck-não-testado), não testado).
+- Qualquer processador de 64 bits de 2008 em diante (com SSE4.1); AVX2 não é necessário.
 - Placa de vídeo com Direct3D 11 e suporte a *rasterizer ordered views* e a precisão dupla nos shaders (desenvolvido numa GeForce GTX 1060). Sem isso o jogo desenha no processador, bem mais devagar.
 
 ### Para Compilar
@@ -255,6 +286,24 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 3. Rode `recompile.bat`. Ele lê o executável do jogo na sua ISO, traduz para C++ as funções listadas em `tools/recomp/functions.txt` (em `recomp/gen`, as listadas em `tools/recomp/hot-functions.txt` separadas das outras), compila os microprogramas da VU1 listados em `tools/recomp/vu-blocks.idx` (em `recomp/vu`) e gera com eles as quatro partes do código do jogo (`codport_game.dll`, `codport_game_vu.dll`, `codport_game_hot.dll`, `codport_game_cold.dll`; o que vai primeiro está listado em `tools/recomp/boot-functions.txt`). Ele gera cerca de 100 MB de código, que não deve ser compartilhado.
 4. Rode `build\codport.exe`. Rodado de um terminal, as mensagens aparecem nele.
 
+### Linux e Steam Deck (não testado)
+
+O port é um programa de Windows, e no Linux ele roda pelo Proton, como a Steam roda jogos de Windows. Isso ainda não foi experimentado num Steam Deck: foi feito a partir de como o Proton, o DXVK e o driver de vídeo do Deck funcionam, e a parte da compilação foi testada no Windows com as mesmas ferramentas. Relatos nas [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) são bem-vindos, funcionando ou não.
+
+O `Setup.exe` e o `Texture Pack Mod.exe` precisam do PowerShell e do Visual Studio do Windows, que o Proton não tem, então no Linux o instalador é o `Setup-Linux.sh`:
+
+1. No Deck, mude para o **Modo Desktop**. A Steam precisa ter um Proton instalado (qualquer jogo de Windows jogado uma vez instala um; ou instale o **Proton Experimental** pela biblioteca). São necessários uns 5 GB livres.
+2. Extraia o zip da release inteiro, por exemplo em `~/Games/Castlevania-COD`, e deixe sua ISO em qualquer lugar.
+3. Abra um terminal ali (Konsole: botão direito na pasta, **Abrir terminal aqui**) e rode `sh Setup-Linux.sh`. Ele pede a ISO (ou passe o caminho depois do comando) e então:
+   - baixa uma vez o `clang-cl` e o `lld-link` do LLVM (uns 2 GB, dos quais ficam uns 300 MB), que geram programas de Windows direto no Linux;
+   - roda o `xwin`, que baixa da Microsoft o runtime de C++ e o SDK do Windows: ele mostra a licença da Microsoft e pede que você digite `yes`;
+   - traduz o jogo do seu disco com o `build/codport.exe`, rodando pelo Proton;
+   - compila as quatro partes do código do jogo, como o `Setup.exe` faz, usando todos os núcleos (alguns minutos no Deck). Pode ser interrompido e rodado de novo: ele continua de onde parou.
+4. Na Steam: **Jogos > Adicionar um jogo não Steam à biblioteca**, procure o `build/codport.exe` e adicione. Em **Propriedades > Compatibilidade**, marque **Forçar o uso de uma ferramenta de compatibilidade específica do Steam Play** e escolha **Proton Experimental** (ou Proton 9 ou mais novo).
+5. Jogue pela Steam, também no Modo de Jogo. Os controles do Deck chegam ao jogo como um controle de Xbox.
+
+Notas para o Deck: o desenho na placa de vídeo precisa de *rasterizer ordered views*, que o Proton (DXVK) oferece no driver do Deck a partir do Mesa 23.2 (o SteamOS atual já tem); sem elas o jogo desenha no processador, devagar demais para jogar. Os shaders já vêm compilados no `build/shaders.bin`, então o compilador de HLSL do Proton não é necessário. Resolução 1x ou 2x combina com a tela do Deck; na tela de 90 Hz do modelo OLED a interpolação pode ser ligada no **F1** (Steam + X abre o teclado). Pacotes de texturas são instalados à mão: os PNG vão em `textures/replace`.
+
 ## Controles
 
 ### Teclado e Mouse
@@ -268,7 +317,7 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 | Pular / Confirmar | Espaço |
 | Habilidade do Innocent Devil / Voltar | E |
 | Defender | F |
-| Travar no alvo | 2 |
+| Travar no alvo | Botão do meio do mouse (clique na roda) |
 | Trocar de alvo | 1 |
 | Centralizar a câmera | Q |
 | Sprint | Shift |
@@ -293,9 +342,18 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 
 ## Configurações
 
-Tudo na janela do **F1** é salvo na hora em `codport.ini`, ao lado da pasta `memcard`; o arquivo é criado na primeira vez que o jogo abre e também pode ser editado à mão. Tela cheia, widescreen, filtro de textura, contador de quadros, minimapa, carregamento rápido e mouse mudam na hora; a resolução interna, o sprint e os ataques no alvo valem na próxima vez que o jogo abrir.
+Tudo na janela do **F1** é salvo na hora em `codport.ini`, ao lado da pasta `memcard`; o arquivo é criado na primeira vez que o jogo abre e também pode ser editado à mão. Todas as opções mudam na hora, inclusive a resolução interna, sem precisar abrir o jogo de novo; o **Salvar** fecha a janela.
 
 Os saves ficam na pasta `memcard`. Cada sessão também é gravada em `build/recordings` (entradas, relógio e uma cópia do cartão de memória) e reproduz exatamente com `codport --replay <arquivo>`; isso serve para testes, e a pasta pode ser apagada.
+
+## Pacotes de Texturas
+
+O port pode usar texturas novas no lugar das do jogo, em qualquer resolução.
+
+- **Para fazer um pacote:** ponha `salvar_texturas=1` no `codport.ini` e jogue. Cada textura que o jogo mostra é salva uma vez em `textures\dump`, como PNG com o nome de um hash do conteúdo (a transparência é salva de modo que 255 seja opaco). Edite ou aumente as imagens, mantendo os nomes.
+- **Para usar um pacote:** abra o `Texture Pack Mod.exe` (ao lado do `Setup.exe`) e escolha o `.zip` ou a pasta do pacote, ou arraste para a janela. Antes de instalar, ele diz quantas texturas o pacote troca e quais delas outros pacotes já instalados trocam; os pacotes também podem ser removidos ali. Quando dois pacotes trocam a mesma textura, vale o instalado por último. À mão, os PNG vão em `textures\replace` (subpastas valem). Com `pacote_texturas=1`, o padrão, o port carrega tudo ao abrir o jogo e desenha no lugar das do jogo.
+
+Só dá para trocar texturas que o jogo carrega do disco, não imagens que ele mesmo desenha (brilhos, o minimapa), e só as que ele desenha suavizadas, que são quase todo o mundo 3D. Pacotes feitos a partir do seu disco são seus; não compartilhe as texturas salvas como estão, já que são do jogo.
 
 ## Notas do Port
 
@@ -313,7 +371,7 @@ Os saves ficam na pasta `memcard`. Cada sessão também é gravada em `build/rec
 ## Problemas Conhecidos
 
 - Só a versão europeia (`SLES-53755`) funciona.
-- Só Windows.
+- Só Windows, fora Linux e Steam Deck pelo Proton, não testados.
 - O carregamento rápido pula o som desses momentos: a música pausa e o som da porta não toca. Ele pode ser desligado no **F1**.
 - Durante o sprint os pés podem deslizar um pouco no chão, porque as passadas são mais longas que as da animação do jogo.
 - Telas ultrawide mostram a imagem 16:9 com barras pretas nas laterais.

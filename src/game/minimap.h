@@ -26,6 +26,9 @@ struct MinimapView {
 
 void installMinimap(const Iso9660& iso);
 void updateMinimap(Cpu& cpu);  // once per frame, on the emulation thread
+// Whether the game is being played, the minimap's own test (not a menu, a movie, a load or a
+// conversation), as of the last update; on the emulation thread.
+bool gamePlaying();
 
 // For the renderer, on its own thread: the newest view, and the triangles if they are not `have`.
 MinimapView minimapView(std::vector<MinimapVertex>& triangles, uint64_t have);

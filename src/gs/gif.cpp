@@ -1,5 +1,6 @@
 #include "gs/gif.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "ee/cpu.h"
@@ -67,15 +68,15 @@ void Gif::kick(const uint8_t* vuData, uint32_t qwords, uint32_t addr) {
   }
 }
 
+// Tag to tag: each tag says how many data qwords follow it (what step() would consume).
 uint32_t Gif::kickLength(const uint8_t* vuData, uint32_t qwords, uint32_t addr) {
-  PathState p;
-  uint64_t packets = 0;
-  for (uint32_t n = 0; n < qwords; ++n) {
-    const bool startsTag = !p.active;
-    uint64_t q[2];
-    std::memcpy(q, vuData + ((addr + n) % qwords) * 16, 16);
-    step<false>(p, q, nullptr, packets);
-    if (!p.active && p.eop && (!startsTag || p.nloop == 0)) return n + 1;
+  uint64_t n = 0;
+  while (n < qwords) {
+    uint64_t tag;
+    std::memcpy(&tag, vuData + ((addr + n) % qwords) * 16, 8);
+    const uint64_t nloop = tag & 0x7FFF, flg = (tag >> 58) & 3, nreg = ((tag >> 60) & 0xF) ? (tag >> 60) & 0xF : 16;
+    n += 1 + (flg == 0 ? nloop * nreg : flg == 1 ? (nloop * nreg + 1) / 2 : nloop);
+    if ((tag >> 15) & 1) return uint32_t(std::min<uint64_t>(n, qwords));  // EOP
   }
   return qwords;
 }

@@ -37,6 +37,9 @@ public:
   // software rasterizer goes on. `window` (an HWND, or null) is where pictures are shown;
   // `scale` multiplies the drawing resolution (GsGpu::create).
   bool useGpu(void* window, uint32_t scale, std::string& error);
+  // The GPU made again at another drawing resolution, from GS memory as it is (the frame buffers'
+  // finer detail comes back as the game draws again); false if it could not, the old scale kept.
+  bool setScale(void* window, uint32_t scale, std::string& error);
   bool usingGpu() const { return gpu_ != nullptr; }
   void frameEnd();  // a frame's drawing is all queued
   void setTextureFilter(bool on) { textureFilter_.store(on, std::memory_order_relaxed); }  // obey TEX1's linear filter (the GPU renderer does)
@@ -75,7 +78,12 @@ public:
   bool frame(std::vector<uint32_t>& rgba, uint32_t& width, uint32_t& height);
   // The same without waiting: the workers build the picture once everything queued is drawn,
   // and latestFrame() hands over the newest finished one (false if none since `serial`).
-  void queueFrame();
+  void queueFrame(uint64_t stamp = 0);  // stamp: the VBlank's time (steady clock, ns), or 0
+  // Interpolation (GsGpu): `wake` is called at each refresh of the screen (from another thread);
+  // tick() then shows that moment's picture, on the thread that draws. Empty: no more calls.
+  void onRefresh(std::function<void()> wake);
+  void setView(float yaw, float pitch, bool playing);  // the camera's view in the picture shown next (GsGpu::setView)
+  void tick();
   bool latestFrame(std::vector<uint32_t>& rgba, uint32_t& width, uint32_t& height, uint64_t& serial);
 
   GsMemory mem;

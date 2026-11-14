@@ -134,6 +134,7 @@ public:
   explicit Minimap(const Iso9660& iso) : iso_(iso) {}
 
   void update(Cpu& c);
+  bool playing() const;  // playable for a frame or more
   MinimapView view(std::vector<MinimapVertex>& triangles, uint64_t have) {
     std::lock_guard lock(mutex_);
     if (have != view_.version) triangles = mesh_;
@@ -365,6 +366,8 @@ void Minimap::publish(const MinimapView& view) {
   view_.version = version;
 }
 
+bool Minimap::playing() const { return playingFrames_ > 0; }
+
 bool Minimap::playable() const {
   const uint32_t player = u32(kPlayer);
   if (player == 0 || s16(player + uint32_t(s16(player + 0x144)) * 2 + 0x146) != 2) return false;  // FUN_00458320
@@ -436,6 +439,8 @@ void installMinimap(const Iso9660& iso) {
 void updateMinimap(Cpu& cpu) {
   if (gMinimap) gMinimap->update(cpu);
 }
+
+bool gamePlaying() { return gMinimap && gMinimap->playing(); }
 
 MinimapView minimapView(std::vector<MinimapVertex>& triangles, uint64_t have) {
   return gMinimap ? gMinimap->view(triangles, have) : MinimapView{};

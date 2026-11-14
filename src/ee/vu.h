@@ -27,13 +27,18 @@ enum : int { kVuStatus = 16, kVuMac = 17, kVuClip = 18, kVuR = 20, kVuI = 21, kV
 CODPORT_API bool vuLowerCommon(VuRegs r, uint32_t op, uint8_t* data, uint32_t dataQwords, uint32_t* q);
 
 // Micro-mode interpreter: runs from a start address until an E-bit (plus its delay slot).
+// It works on a register file of its own (registers at fixed offsets from the unit, so compiled
+// code reaches them without loading pointers); `regs`, if given, is an outside one (VU0's: the
+// EE's COP2 registers) copied in and back out around each run, which the EE waits for.
 class CODPORT_API VuMicro {
 public:
   VuMicro(VuRegs regs, uint8_t* code, uint32_t codeBytes, uint8_t* data, uint32_t dataBytes)
-      : r_(regs), code_(code), codeBytes_(codeBytes), data_(data), dataBytes_(dataBytes) {}
+      : outside_(regs), code_(code), codeBytes_(codeBytes), data_(data), dataBytes_(dataBytes) {}
+  VuMicro(const VuMicro&) = delete;  // r_ points into the object
+  VuMicro& operator=(const VuMicro&) = delete;
 
   void run(uint32_t startAddr);  // byte address in micro memory
-  void setRegs(VuRegs regs) { r_ = regs; }
+  void setRegs(VuRegs regs) { outside_ = regs; }
   void codeChanged() { ++generation_; }  // micro memory was written (decoded pairs are stale)
   const uint64_t* codeTouches = nullptr;  // counts EE accesses to micro memory (Memory::vuCodeTouches)
 
@@ -95,6 +100,9 @@ public:
   static void lowerInteger(VuMicro& m, const Pair& p, uint32_t pc);
   static void lowerMfir(VuMicro& m, const Pair& p, uint32_t);
   static void lowerMtir(VuMicro& m, const Pair& p, uint32_t);
+  static void lowerMr32(VuMicro& m, const Pair& p, uint32_t);
+  static void lowerRnext(VuMicro& m, const Pair& p, uint32_t);  // and RGET
+  static void lowerMfp(VuMicro& m, const Pair& p, uint32_t);
   static void lowerDiv(VuMicro& m, const Pair& p, uint32_t);
   static void lowerXgkick(VuMicro& m, const Pair& p, uint32_t);
   template <int Scale>
@@ -112,6 +120,7 @@ public:
   struct BlockCache {
     uint64_t generation = 0;
     BlockFn fn = nullptr;
+    std::vector<uint8_t> code;  // the words `fn` was found for: still them, still it (no new lookup)
   };
   std::vector<BlockCache> blocks_;
   bool blockEnded_ = false;  // the block ran the program's last pair
@@ -139,7 +148,12 @@ public:
   void lower(uint32_t op, uint32_t pc);
   void branchTo(uint32_t target) { branchPending_ = true; branchTarget_ = target; }
 
-  VuRegs r_;
+  u128 vf_[32]{};
+  uint32_t vi_[32]{};
+  u128 acc_{};
+  VuRegs r_{vf_, vi_, &acc_};
+  VuRegs outside_;
+  void execute(uint32_t startAddr);
   uint8_t* code_;
   uint32_t codeBytes_;
   uint8_t* data_;

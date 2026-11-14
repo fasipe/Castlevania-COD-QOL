@@ -4,6 +4,8 @@
 // reference R5900 interpreter with the EE kernel, IOP and graphics replaced by C++, showing the
 // picture in a window. When it stops, it reports exactly where and why.
 
+#include <intrin.h>
+
 #include <algorithm>
 #include <ctime>
 #include <sstream>
@@ -13,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <string>
+#include <tuple>
 #include <thread>
 #include <vector>
 
@@ -22,9 +25,11 @@
 #include "ee/vu.h"
 #include "elf.h"
 #include "gs/graphics.h"
+#include "gs/shader_cache.h"
 #include "host/audio.h"
 #include "host/gamepad.h"
 #include "host/icon.h"
+#include "host/screenshot.h"
 #include "host/settings.h"
 #include "game/attack_turn.h"
 #include "game/loading.h"
@@ -48,6 +53,19 @@ bool newGameCode(std::vector<rc::Entry>& out);
 namespace fs = std::filesystem;
 
 namespace {
+// AVX2, with the operating system saving the YMM registers (CPUID leaf 7 EBX bit 5; OSXSAVE and
+// XCR0 bits 1-2).
+bool cpuHasAvx2() {
+  int r[4];
+  __cpuid(r, 0);
+  if (r[0] < 7) return false;
+  __cpuid(r, 1);
+  const bool osxsave = (r[2] & (1 << 27)) != 0, avx = (r[2] & (1 << 28)) != 0;
+  if (!osxsave || !avx || (_xgetbv(0) & 6) != 6) return false;
+  __cpuidex(r, 7, 0);
+  return (r[1] & (1 << 5)) != 0;
+}
+
 void usage() {
   std::puts(
       "usage: codport [image.iso] [options]\n"
@@ -70,7 +88,9 @@ void usage() {
       "  --attack-turn    attacks turn to the locked enemy in a replay of a recording made without it\n"
       "  --sprint         L3 sprints in a replay of a recording made without it\n"
       "  --recompile L D  translate the functions listed in L (Ghidra export) to C++ in folder D\n"
+      "  --shot N         save the window as shown at frame N as build/shots/shot-N.png (also F12 in the window)\n"
       "  --make-icon F    draw the program's icon (the game's memory card icon, from the disc) into F\n"
+      "  --shader-cache F compile every graphics card shader into F (build/shaders.bin: no HLSL compiler needed, as on Linux)\n"
       "  --only F         with --recompile: only the functions whose addresses are in F\n"
       "  --vu-recompile B D  compile the VU micro-program blocks in B (files separated by ';') to C++ in D: collected\n"
       "                   (CODPORT_VU_COLLECT), or an index of where they are in the game's executable (tools/recomp/vu-blocks.idx)");
@@ -154,6 +174,7 @@ int main(int argc, char** argv) {
   };
   std::vector<MemDump> memDumps;  // EE memory ranges saved to files at the end (debugging)
   fs::path recompileList, recompileOut, recompileOnly, vuBlocksFile, vuOut, iconOut;
+  std::vector<uint64_t> shots;  // --shot N: frames to take a screenshot of the window at
   std::string wavFile;  // the sound output, saved at the end
   fs::path replayFile;  // a recorded session to play back (build/recordings/*.txt)
   int scaleOption = 0;  // --scale: over the setting, for this run
@@ -209,8 +230,17 @@ int main(int argc, char** argv) {
     } else if (a == "--vu-recompile" && i + 2 < argc) {
       vuBlocksFile = argv[++i];
       vuOut = argv[++i];
+    } else if (a == "--shot" && i + 1 < argc) {
+      shots.push_back(std::stoull(argv[++i]));
     } else if (a == "--make-icon" && i + 1 < argc) {
       iconOut = argv[++i];
+    } else if (a == "--shader-cache" && i + 1 < argc) {
+      std::string error;
+      if (!writeShaderCache(argv[++i], error)) {
+        std::printf("error: %s\n", error.c_str());
+        return 1;
+      }
+      return 0;
     } else if (a == "--only" && i + 1 < argc) {
       recompileOnly = argv[++i];
     } else if (a == "-h" || a == "--help") {
@@ -352,6 +382,11 @@ int main(int argc, char** argv) {
     PadInput pad;
   };
   std::vector<PadSample> replay;
+  struct ReplaySet {
+    uint64_t frame;
+    bool sprint, on;  // sprint, else the attack turn
+  };
+  std::vector<ReplaySet> replaySets;
   std::ofstream recording;
   const fs::path buildDir = exeDir;
   auto copyCard = [](const fs::path& from, const fs::path& to) {
@@ -373,6 +408,13 @@ int main(int argc, char** argv) {
       }
       if (line == "sprint") {
         setSprint(true);
+        continue;
+      }
+      if (line.rfind("set ", 0) == 0) {  // an option changed while it played: "set <frame> <name> <0|1>"
+        std::string word, name;
+        uint64_t frame = 0;
+        int on = 0;
+        if (ls >> word >> frame >> name >> on) replaySets.push_back({frame, name == "sprint", on != 0});
         continue;
       }
       if (line.rfind("clock ", 0) == 0) {
@@ -430,11 +472,36 @@ int main(int argc, char** argv) {
   if (!software) {
     std::string why;
     gfx.gs.setTextureFilter(headless ? filterOption : settings().textureFilter);
-    if (!headless) onSettingsChanged([&gfx] { gfx.gs.setTextureFilter(settings().textureFilter); });
+    if (!headless)
+      onSettingsChanged([&gfx, &window, &mem, &recording, replaying = !replayFile.empty(), fixedScale = scaleOption != 0] {
+        gfx.gs.setTextureFilter(settings().textureFilter);
+        // The drawing resolution: the graphics card made again (not in a replay given --scale).
+        static uint32_t scale = uint32_t(settings().scale);
+        if (!fixedScale && gfx.gs.usingGpu() && uint32_t(settings().scale) != scale) {
+          std::string why;
+          if (gfx.setScale(window.handle(), uint32_t(settings().scale), why)) scale = uint32_t(settings().scale);
+          else std::printf("the drawing resolution could not change: %s\n", why.c_str());
+        }
+        // Sprint and the attack turn change how the game plays: a recording notes when.
+        if (replaying) return;
+        static bool sprint = settings().sprint, turn = settings().attackTurn;
+        for (auto [now, was, name] : {std::tuple{settings().sprint, &sprint, "sprint"}, std::tuple{settings().attackTurn, &turn, "attack-turn"}}) {
+          if (now == *was) continue;
+          *was = now;
+          if (recording.is_open()) recording << "set " << std::dec << mem.hw.frames << ' ' << name << ' ' << (now ? 1 : 0) << '\n', recording.flush();
+        }
+        setSprint(sprint), setAttackTurn(turn);
+      });
     if (gfx.useGpu(headless ? nullptr : window.handle(), uint32_t(scaleOption ? scaleOption : settings().scale), why))
       std::printf("drawing on the graphics card\n");
     else
       std::printf("drawing on the CPU: %s\n", why.c_str());
+  }
+  if (!gfx.gs.usingGpu() && !cpuHasAvx2()) {  // the CPU renderer is written for AVX2
+    reportError("This graphics card cannot draw the game (" + std::string(software ? "--software" : "no Direct3D 11 with the features the port needs") +
+                ") and this processor has no AVX2, which drawing on the processor needs.\n\nEsta placa de video nao consegue desenhar o "
+                "jogo e este processador nao tem AVX2, que desenhar no processador exige.");
+    return 1;
   }
   if (!headless) {  // the FPS counter's "possible": the busiest of these sets the pace
     void* emulation = currentThreadHandle();
@@ -447,6 +514,8 @@ int main(int argc, char** argv) {
   std::vector<uint32_t> picture;
   uint64_t shownSerial = 0;
   auto wallStart = std::chrono::steady_clock::now();
+  // A replay in the window taking screenshots runs as fast as it can, silent.
+  const bool unpaced = !replayFile.empty() && !shots.empty();
   mem.hw.onVblank = [&] {
     const bool loading = !headless && settings().fastLoading && gameIsLoading(mem);
     const uint64_t n = mem.hw.frames;
@@ -476,11 +545,12 @@ int main(int argc, char** argv) {
       last = now;
     }
     if (!sound.empty()) {
-      if (!headless && !loading) speakers.push(sound.data(), sound.size());
+      if (!headless && !loading && !unpaced) speakers.push(sound.data(), sound.size());
       if (!wavFile.empty()) audio.insert(audio.end(), sound.begin(), sound.end());
       sound.clear();
     }
     if (stopFrame && n >= stopFrame) cpu.halt(StopReason::Limit, std::format("frame {}", n));
+    if (std::find(shots.begin(), shots.end(), n) != shots.end()) requestScreenshot(exeDir / "shots" / std::format("shot-{:05}.png", n));
     // Parts of the game's code the setup finished building since: in use from now on, where the
     // interpreter ran them (never over a slot already filled, the port's hooks among them).
     if (!interpOnly && n % 50 == 0) {
@@ -506,8 +576,10 @@ int main(int argc, char** argv) {
         if (n >= p.from && n <= p.to) held |= p.buttons, stick |= p.stick;
       setPad(gPadInput, held, stick);
     } else if (!replay.empty()) {
-      static size_t next = 0;
+      static size_t next = 0, nextSet = 0;
       while (next < replay.size() && replay[next].frame <= n) gPadInput = replay[next++].pad;
+      for (; nextSet < replaySets.size() && replaySets[nextSet].frame <= n; ++nextSet)
+        (replaySets[nextSet].sprint ? setSprint : setAttackTurn)(replaySets[nextSet].on);
     } else if (!headless) {
       applyGamepad(keyboardPad());
     }
@@ -528,6 +600,17 @@ int main(int argc, char** argv) {
     queueCameraTurn(gPadInput.turnYaw, gPadInput.turnPitch);
     gPadInput.turnYaw = gPadInput.turnPitch = 0;
     uint32_t w = 0, h = 0;
+    {  // The camera's view for interpolation: a picture shows the game as it was 3 VBlanks before (measured).
+      static std::array<std::pair<float, float>, 4> views{};
+      float yaw = 0, pitch = 0;
+      views[n % 4] = cameraView(yaw, pitch) ? std::pair{yaw, pitch} : std::pair{NAN, NAN};
+      std::tie(gfx.viewYaw, gfx.viewPitch) = n >= 3 ? views[(n - 3) % 4] : std::pair{NAN, NAN};
+      // Interpolated only while the game has been played for the frames the picture lags behind
+      // (menus, movies and conversations are shown as they are).
+      static uint32_t playedFor = 0;
+      playedFor = gamePlaying() ? playedFor + 1 : 0;
+      gfx.viewPlaying = playedFor > 4;
+    }
     if (dumpEvery && n >= dumpFrom && n % dumpEvery == 0) {  // exact picture of this VBlank
       gfx.vblank(false);
       gfx.drain();
@@ -547,7 +630,7 @@ int main(int argc, char** argv) {
       // than it plays (and the excess would be cut), so the pace starts again from now.
       const auto due = wallStart + std::chrono::microseconds(mem.hw.cycles * 1000000 / Hardware::kEeHz);
       const auto now = std::chrono::steady_clock::now();
-      if (loading) {  // no waiting: the game does little here but count frames
+      if (loading || unpaced) {  // no waiting: the game does little here but count frames
         if (now < due) wallStart -= due - now;
       } else if (now < due) sleepUntil(due);
       else if (now - due > std::chrono::milliseconds(50)) wallStart += now - due;

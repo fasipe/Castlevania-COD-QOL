@@ -31,6 +31,7 @@ struct Settings {
   bool wide = false;  // the picture shown 16:9 instead of 4:3
   int scale = 1;      // drawing resolution, 1-4 times the PS2's (read at start)
   bool showFps = true;  // frames per second in the top right corner (F9)
+  bool interpolation = false;  // pictures made between the game's, on screens of 100 Hz or more
   bool minimap = true;  // the map in the corner of the screen (F8)
   bool textureFilter = true;  // as the PS2 filters (read at start)
   bool fastLoading = true;  // between places, no waiting for real time (nor its sound)
@@ -39,6 +40,8 @@ struct Settings {
   bool mouseCamera = true;  // the mouse turns the camera (the right stick) while the window holds it
   int mouseSensitivity = 5;  // 1-10
   bool invertMouseY = false;  // pushing the mouse forward looks down instead of up
+  bool texturePack = true;    // textures/replace used in place of the game's (read at start)
+  bool dumpTextures = false;  // the game's textures saved in textures/dump (read at start)
   std::string language;  // of the options window (F1) and the window's title: "pt" or "en"
 
   static Settings defaults();
