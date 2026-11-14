@@ -70,7 +70,7 @@ Install Visual Studio or the Visual Studio Build Tools with **Desktop developmen
 
 ### 2. Get the Port
 
-Download the latest release from the **Releases** page and extract it. It comes with the port already built (`build\codport.exe`), which holds nothing of the game. Cloning the repository works too; then the setup builds the port first, which takes a couple of minutes more.
+Download the latest release from the **Releases** page (the `Windows` zip, or the `Linux-SteamDeck` one for [Linux and Steam Deck](#linux-and-steam-deck-untested)) and extract it. It comes with the port already built (`build\codport.exe`), which holds nothing of the game. Cloning the repository works too; then the setup builds the port first, which takes a couple of minutes more.
 
 ### 3. Run the Setup
 
@@ -95,7 +95,7 @@ The port is a Windows program, and on Linux it runs through Proton, as Steam run
 `Setup.exe` and `Texture Pack Mod.exe` need Windows' PowerShell and Visual Studio, which Proton does not have, so on Linux the setup is `Setup-Linux.sh`:
 
 1. On the Deck, switch to **Desktop Mode**. Steam must have a Proton installed (any Windows game played once installs one; or install **Proton Experimental** from the library). About 5 GB must be free.
-2. Extract the release zip whole, for example into `~/Games/Castlevania-COD`, and put your ISO anywhere.
+2. Extract the release's `Linux-SteamDeck` zip whole, for example into `~/Games/Castlevania-COD`, and put your ISO anywhere.
 3. Open a terminal there (Konsole: right click in the folder, **Open Terminal Here**) and run `sh Setup-Linux.sh`. It asks for the ISO (or give its path after the command) and then:
    - downloads LLVM's `clang-cl` and `lld-link` once (about 2 GB, of which some 300 MB are kept), which build Windows programs natively on Linux;
    - runs `xwin`, which downloads Microsoft's C++ runtime and Windows SDK from Microsoft: it shows Microsoft's license and asks you to type `yes`;
@@ -268,7 +268,7 @@ Instale o Visual Studio ou o Visual Studio Build Tools com **Desenvolvimento par
 
 ### 2. Baixe o Port
 
-Baixe a versão mais recente na página **Releases** e extraia. Ela já vem com o port compilado (`build\codport.exe`), que não contém nada do jogo. Clonar o repositório também funciona; aí o Setup compila o port antes, o que leva alguns minutos a mais.
+Baixe a versão mais recente na página **Releases** (o zip `Windows`, ou o `Linux-SteamDeck` para [Linux e Steam Deck](#linux-e-steam-deck-não-testado)) e extraia. Ela já vem com o port compilado (`build\codport.exe`), que não contém nada do jogo. Clonar o repositório também funciona; aí o Setup compila o port antes, o que leva alguns minutos a mais.
 
 ### 3. Rode o Setup
 
@@ -293,7 +293,7 @@ O port é um programa de Windows, e no Linux ele roda pelo Proton, como a Steam 
 O `Setup.exe` e o `Texture Pack Mod.exe` precisam do PowerShell e do Visual Studio do Windows, que o Proton não tem, então no Linux o instalador é o `Setup-Linux.sh`:
 
 1. No Deck, mude para o **Modo Desktop**. A Steam precisa ter um Proton instalado (qualquer jogo de Windows jogado uma vez instala um; ou instale o **Proton Experimental** pela biblioteca). São necessários uns 5 GB livres.
-2. Extraia o zip da release inteiro, por exemplo em `~/Games/Castlevania-COD`, e deixe sua ISO em qualquer lugar.
+2. Extraia o zip `Linux-SteamDeck` da release inteiro, por exemplo em `~/Games/Castlevania-COD`, e deixe sua ISO em qualquer lugar.
 3. Abra um terminal ali (Konsole: botão direito na pasta, **Abrir terminal aqui**) e rode `sh Setup-Linux.sh`. Ele pede a ISO (ou passe o caminho depois do comando) e então:
    - baixa uma vez o `clang-cl` e o `lld-link` do LLVM (uns 2 GB, dos quais ficam uns 300 MB), que geram programas de Windows direto no Linux;
    - roda o `xwin`, que baixa da Microsoft o runtime de C++ e o SDK do Windows: ele mostra a licença da Microsoft e pede que você digite `yes`;
