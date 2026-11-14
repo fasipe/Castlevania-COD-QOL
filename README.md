@@ -32,7 +32,10 @@ The port is made with the help of AI (Anthropic's Claude). Every change is teste
 - **Settings menu** - **F1** opens a window with every action of the game to remap to a key or controller button, and all of the options above, each of which can be turned off. It is in English or Portuguese, chosen in the window itself (by default, the language of Windows).
 - **Any screen size** - full screen at the monitor's own resolution, or a window sized for 1080p, 1440p, 4K or ultrawide screens, the picture kept in proportion with black bars.
 - **Keyboard and Xbox controller** - XInput controllers work out of the box, and an optional frame counter shows performance (**F9**).
-- **Interpolation (optional)** - on screens of 100 Hz or more, a picture is made for every refresh of the screen between the game's own, from the motion between them, so the game shows at 120, 144 or 240 frames per second. It is off by default (**F1**): it shows the game about one frame later, and fast-changing moments (explosions, scene cuts) can show small flaws.
+- **Interpolation (optional)** - the port's own way to run above 60 frames per second: on screens of 100 Hz or more, a picture is made for every refresh of the screen between the game's own, from the motion between them (guided by the camera's turn and by depth, so Hector and the characters in front stay solid instead of ghosting), and the game shows at 120, 144 or 240 frames per second while its logic stays at 60. It works only during play: menus, movies and conversations are shown as they are. It is off by default (**F1**): it shows the game about one frame later, and fast-changing moments (explosions, scene cuts) can show small flaws.
+- **Texture packs** - the game's textures can be saved and replaced by new ones at any resolution, and `Texture Pack Mod.exe` installs a pack from its `.zip` or folder, saying first what it replaces (see [Texture Packs](#texture-packs)).
+- **Screenshots** - **F12** saves the window as shown (without the frame counter) as a PNG in the `screenshots` folder.
+- **Linux and Steam Deck** - a version that runs through Proton, with its own setup (see [Linux and Steam Deck](#linux-and-steam-deck-untested); done, but untested on a Deck).
 - **Keyboard and mouse** - W/A/S/D move Hector, the mouse turns the camera directly (no lag, its sensitivity and an inverted vertical axis in **F1**), and its left and right buttons attack. A click in the window holds the cursor there; **Esc** lets it go.
 
 ## Required Game Version
@@ -90,7 +93,10 @@ Both parts are compiled with full optimization, and the same code results as bui
 
 ### Linux and Steam Deck (untested)
 
-The port is a Windows program, and on Linux it runs through Proton, as Steam runs Windows games. This has not been tried on a Steam Deck yet: it is written from how Proton, DXVK and the Deck's graphics driver work, and its compile step was tested on Windows with the same tools. Reports in [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) are welcome, working or not.
+> [!NOTE]
+> **Status: done, but not tested on a Steam Deck.** The Linux version is complete and comes in its own download (`Linux-SteamDeck`), but we have no access to anyone with a Steam Deck to try it. It was written from how Proton, DXVK and the Deck's graphics driver work, and its compile step was tested on Windows with the same tools (the same pictures and speed as the Windows build). If you have a Deck, a report in [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) helps a lot, working or not.
+
+The port is a Windows program, and on Linux it runs through Proton, as Steam runs Windows games.
 
 `Setup.exe` and `Texture Pack Mod.exe` need Windows' PowerShell and Visual Studio, which Proton does not have, so on Linux the setup is `Setup-Linux.sh`:
 
@@ -230,7 +236,10 @@ O port é feito com a ajuda de IA (o Claude, da Anthropic). Cada alteração é 
 - **Menu de configurações** - o **F1** abre uma janela com todas as ações do jogo para trocar a tecla ou o botão do controle, e todas as opções acima, cada uma podendo ser desligada. Ela fica em português ou inglês, escolhido na própria janela (por padrão, o idioma do Windows).
 - **Qualquer tamanho de tela** - tela cheia na resolução do próprio monitor, ou janela em tamanhos para telas 1080p, 1440p, 4K ou ultrawide, com a imagem mantida na proporção por barras pretas.
 - **Teclado e controle Xbox** - controles XInput funcionam direto, e um contador de quadros opcional mostra o desempenho (**F9**).
-- **Interpolação (opcional)** - em telas de 100 Hz ou mais, uma imagem é feita para cada atualização da tela entre as do jogo, a partir do movimento entre elas, e o jogo aparece a 120, 144 ou 240 quadros por segundo. Vem desligada (**F1**): mostra o jogo cerca de um quadro depois, e momentos que mudam muito rápido (explosões, cortes de cena) podem ter pequenas falhas.
+- **Interpolação (opcional)** - o jeito do próprio port de rodar acima de 60 quadros por segundo: em telas de 100 Hz ou mais, uma imagem é feita para cada atualização da tela entre as do jogo, a partir do movimento entre elas (guiado pelo giro da câmera e pela profundidade, para que o Hector e os personagens na frente fiquem sólidos em vez de deixar fantasma), e o jogo aparece a 120, 144 ou 240 quadros por segundo enquanto a lógica continua a 60. Funciona só durante o jogo: menus, filmes e conversas aparecem como são. Vem desligada (**F1**): mostra o jogo cerca de um quadro depois, e momentos que mudam muito rápido (explosões, cortes de cena) podem ter pequenas falhas.
+- **Pacotes de texturas** - as texturas do jogo podem ser salvas e trocadas por novas em qualquer resolução, e o `Texture Pack Mod.exe` instala um pacote a partir do `.zip` ou da pasta, dizendo antes o que ele troca (veja [Pacotes de Texturas](#pacotes-de-texturas)).
+- **Capturas de tela** - o **F12** salva a janela como ela aparece (sem o contador de quadros) como PNG na pasta `screenshots`.
+- **Linux e Steam Deck** - uma versão que roda pelo Proton, com instalador próprio (veja [Linux e Steam Deck](#linux-e-steam-deck-não-testado); pronta, mas não testada num Deck).
 - **Teclado e mouse** - W/A/S/D movem o Hector, o mouse gira a câmera direto (sem atraso, com sensibilidade e vertical invertido no **F1**) e seus botões esquerdo e direito atacam. Um clique na janela prende o cursor nela; o **Esc** solta.
 
 ## Versão Necessária do Jogo
@@ -288,7 +297,10 @@ As duas partes são compiladas com otimização total, e o resultado é o mesmo 
 
 ### Linux e Steam Deck (não testado)
 
-O port é um programa de Windows, e no Linux ele roda pelo Proton, como a Steam roda jogos de Windows. Isso ainda não foi experimentado num Steam Deck: foi feito a partir de como o Proton, o DXVK e o driver de vídeo do Deck funcionam, e a parte da compilação foi testada no Windows com as mesmas ferramentas. Relatos nas [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) são bem-vindos, funcionando ou não.
+> [!NOTE]
+> **Estado: pronto, mas não testado num Steam Deck.** A versão para Linux está completa e vem num download próprio (`Linux-SteamDeck`), mas não temos acesso a ninguém com um Steam Deck para experimentar. Ela foi feita a partir de como o Proton, o DXVK e o driver de vídeo do Deck funcionam, e a parte da compilação foi testada no Windows com as mesmas ferramentas (as mesmas imagens e a mesma velocidade da versão de Windows). Se você tem um Deck, um relato nas [Issues](https://github.com/fasipe/Castlevania-COD-QOL/issues) ajuda muito, funcionando ou não.
+
+O port é um programa de Windows, e no Linux ele roda pelo Proton, como a Steam roda jogos de Windows.
 
 O `Setup.exe` e o `Texture Pack Mod.exe` precisam do PowerShell e do Visual Studio do Windows, que o Proton não tem, então no Linux o instalador é o `Setup-Linux.sh`:
 
